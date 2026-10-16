@@ -144,7 +144,7 @@ PF_Err ReadSettings(PF_InData* in_data, bt::Settings& s)
     s.blendMode       = static_cast<bt::BlendMode>(r.Popup(BT_BLEND_MODE));
     s.colorBalance    = r.Float(BT_COLOR_BALANCE) / 100.f;
     s.intensity       = r.Float(BT_INTENSITY) / 100.f;
-    s.mix             = r.Float(BT_MIX) / 100.f;
+    s.mix             = 1.f - r.Float(BT_BLEND_ORIGINAL) / 100.f;  // mix = share of the effect
 
     return r.err();
 }
@@ -274,8 +274,9 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data)
                          PF_ValueDisplayFlag_PERCENT, 0, ID_INTENSITY);
 
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Mix with Original", 0, 100, 0, 100, 100, 1,
-                         PF_ValueDisplayFlag_PERCENT, 0, ID_MIX);
+    // AE convention: 0% = full effect, 100% = original layer.
+    PF_ADD_FLOAT_SLIDERX("Blend With Original", 0, 100, 0, 100, 0, 1,
+                         PF_ValueDisplayFlag_PERCENT, 0, ID_BLEND_ORIGINAL);
 
     // Off = always render on the CPU (After Effects then skips the GPU path).
     AEFX_CLR_STRUCT(def);

@@ -74,7 +74,7 @@ enum {
     BT_BLEND_MODE,
     BT_COLOR_BALANCE,
     BT_INTENSITY,
-    BT_MIX,
+    BT_BLEND_ORIGINAL,
     BT_USE_GPU,
 
     BT_NUM_PARAMS
@@ -112,11 +112,12 @@ enum {
     ID_TINT_MODE,
     ID_BLEND_MODE,
     ID_INTENSITY,
-    ID_MIX,
+    ID_MIX_UNUSED,       // old "Mix with Original" (inverted meaning) - keep for ID stability
     ID_USE_GPU,
     ID_EDGE_MODE,
     ID_COLOR_BALANCE,
-    ID_COLOR_ORDER
+    ID_COLOR_ORDER,
+    ID_BLEND_ORIGINAL
 };
 
 // "Clip Edges" popup values.

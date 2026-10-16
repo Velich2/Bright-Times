@@ -220,6 +220,40 @@ int main(int argc, char** argv) {
     std::printf("color order: %s\n", ok ? "OK" : "FAIL");
     if (!ok) return 1;
   }
+  // Blend With Original: 0% = full effect, 100% = the untouched current frame.
+  {
+    g_fmt = PF_PixelFormat_ARGB128;
+    g_params[BT_BLEND_MODE-1].u.pd.value = 2;  // Additive: changes static areas too
+    float px0[4], px100[4], src[4];
+    auto renderPx = [&](double blendOrig, int x, int y, float* px) -> bool {
+      g_params[BT_BLEND_ORIGINAL-1].u.fs_d.value = blendOrig;
+      g_checkTime.clear();
+      PF_PreRenderInput pin{}; PF_PreRenderOutput pout{}; PF_PreRenderCallbacks pcb{checkout_layer};
+      PF_PreRenderExtra pex{&pin, &pout, &pcb};
+      if (EffectMain(PF_Cmd_SMART_PRE_RENDER, &in, &out, nullptr, nullptr, &pex)) return false;
+      g_output = makeWorld();
+      PF_SmartRenderInput sin{}; sin.pre_render_data = pout.pre_render_data;
+      PF_SmartRenderCallbacks scb{checkout_layer_pixels, checkin_layer_pixels, checkout_output};
+      PF_SmartRenderExtra sex{&sin, &scb};
+      g_inputCheckouts = 0;
+      const PF_Err e = EffectMain(PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex);
+      pout.delete_pre_render_data_func(pout.pre_render_data);
+      get(g_output->w, x, y, px);
+      delete g_output;
+      return e == 0;
+    };
+    { Frame* f0 = renderFrame(in.current_time); get(f0->w, 300, 10, src); delete f0; }
+    bool ok = renderPx(0, 300, 10, px0) && renderPx(100, 300, 10, px100);
+    bool origOk = true, effectDiffers = false;
+    for (int c = 0; c < 4; ++c) {
+      if (std::fabs(px100[c] - src[c]) > 1e-5f) origOk = false;
+      if (std::fabs(px0[c] - src[c]) > 1e-3f) effectDiffers = true;
+    }
+    std::printf("blend with original: 100%% -> original %s, 0%% -> effect %s\n", origOk ? "OK" : "FAIL", effectDiffers ? "OK" : "FAIL");
+    if (!ok || !origOk || !effectDiffers) return 1;
+    g_params[BT_BLEND_ORIGINAL-1].u.fs_d.value = 0;
+    g_params[BT_BLEND_MODE-1].u.pd.value = 1;
+  }
   std::printf("checkout times:"); for (auto& kv : g_checkTime) std::printf(" %d@%d", kv.first, kv.second); std::printf("\n");
   std::printf("ALL OK\n");
   return 0;

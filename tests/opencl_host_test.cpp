@@ -105,7 +105,7 @@ int main() {
                    {4,2,40,150,1,1,100,0,false}, {5,1,100,200,3,1,29,0,false}, {5,2,70,100,1,2,0,6,true}, {1,1,60,100,1,1,30,7,false}, {3,2,100,50,2,2,0,5,true} };
   int fails = 0;
   for (auto& c : cases) {
-    g_params[BT_BLEND_MODE-1].u.pd.value = c.blend; g_params[BT_TINT_MODE-1].u.pd.value = c.tint; g_params[BT_MIX-1].u.fs_d.value = c.mix;
+    g_params[BT_BLEND_MODE-1].u.pd.value = c.blend; g_params[BT_TINT_MODE-1].u.pd.value = c.tint; g_params[BT_BLEND_ORIGINAL-1].u.fs_d.value = 100 - c.mix;  // c.mix = effect share
     g_params[BT_INTENSITY-1].u.fs_d.value = c.intensity; g_params[BT_COLOR_MODE-1].u.pd.value = c.colorMode; g_params[BT_GROUP_MODE-1].u.pd.value = c.groupMode;
     g_params[BT_GROUP_SOFTNESS-1].u.fs_d.value = c.soft; g_params[BT_CURRENT_UNTINTED-1].u.bd.value = c.untinted; g_srcOriginShift = c.shift;
     auto a = run(false), b = run(true);
