@@ -15,7 +15,8 @@
 
 | Параметр | Что делает |
 |---|---|
-| **Frames Backward / Frames Forward** | Сколько кадров брать назад / вперёд (0–50). |
+| **Frames Backward** | Сколько кадров брать назад (0–50): числовое поле + слайдер, анимируется ключами. |
+| **Frames Forward** | Сколько кадров брать вперёд (0–50), независимо от Backward. |
 | **Frame Step** | Шаг между взятыми кадрами (1 = соседние, 3 = каждый третий…). |
 | **Include Current Frame** | Участвует ли текущий кадр в наложении. |
 | **Keep Current Untinted** | Текущий кадр не окрашивается (белый фильтр) и не входит в группы. |
@@ -59,11 +60,28 @@ tools/preview.cpp          офлайн-превью алгоритма
 
 ### Windows (Visual Studio 2022)
 
-```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DAE_SDK_ROOT=C:/AE_SDK ^
-      -DBT_ENABLE_CUDA=ON
-cmake --build build --config Release
-```
+Нужно: Visual Studio 2022 с «Разработка классических приложений на C++», CMake ≥ 3.21,
+для GPU — CUDA Toolkit (даёт и CUDA, и заголовки OpenCL).
+
+1. Склонировать репозиторий и перейти в ветку:
+   ```bat
+   git clone https://github.com/velich2/bright-times.git
+   cd bright-times
+   git checkout claude/compassionate-goldberg-4jxvsv
+   ```
+2. Проверить SDK и инструменты (из корня репозитория):
+   ```bat
+   powershell -ExecutionPolicy Bypass -File tools\check_sdk.ps1 -SdkRoot "C:\Users\Velich\AfterEffectsSDK_26.5_win"
+   ```
+3. Собрать — **все команды запускаются в корне репозитория** (папка с `CMakeLists.txt`),
+   в «x64 Native Tools Command Prompt for VS 2022» или обычном терминале:
+   ```bat
+   cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DAE_SDK_ROOT="C:/Users/Velich/AfterEffectsSDK_26.5_win" -DBT_ENABLE_CUDA=ON
+   cmake --build build --config Release
+   ```
+   Без CUDA Toolkit — убрать `-DBT_ENABLE_CUDA=ON`. Папка `Examples` ищется автоматически,
+   даже если архив SDK распакован с лишней вложенной папкой; при нехватке файлов CMake
+   перечислит, чего не хватает.
 
 * OpenCL включён по умолчанию (нужны заголовки/`OpenCL.lib`, например из CUDA Toolkit или Khronos OpenCL SDK; `OpenCL.dll` грузится отложенно).
 * `-DBT_ENABLE_CUDA=ON` — нужен CUDA Toolkit; архитектуры по умолчанию `61;75;86;89` (`-DCMAKE_CUDA_ARCHITECTURES=...`).

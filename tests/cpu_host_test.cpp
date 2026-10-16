@@ -106,6 +106,24 @@ int main(int argc, char** argv) {
     if (bm == 1 && (std::fabs(o[1]-src[1]) > 1.5f/255 || std::fabs(o[2]-src[2]) > 1.5f/255 || std::fabs(o[3]-src[3]) > 1.5f/255)) { std::printf("FAIL: optical changed a static pixel\n"); return 1; }
     delete f0; delete g_output;
   }
+  // Backward / forward counts are independent: 2 back, 6 forward (fractional
+  // keyframe values round to whole frames).
+  {
+    g_params[BT_FRAMES_BACKWARD-1].u.fs_d.value = 2.2;
+    g_params[BT_FRAMES_FORWARD-1].u.fs_d.value  = 5.6;
+    g_checkTime.clear();
+    PF_PreRenderInput pin{}; PF_PreRenderOutput pout{}; PF_PreRenderCallbacks pcb{checkout_layer};
+    PF_PreRenderExtra pex{&pin, &pout, &pcb};
+    if (EffectMain(PF_Cmd_SMART_PRE_RENDER, &in, &out, nullptr, nullptr, &pex)) { std::printf("FAIL: prerender\n"); return 1; }
+    pout.delete_pre_render_data_func(pout.pre_render_data);
+    std::vector<A_long> times;
+    for (auto& kv : g_checkTime) if (kv.first != 10000) times.push_back(kv.second);
+    const std::vector<A_long> expected = {3, 4, 5, 6, 7, 8, 9, 10, 11};  // current_time 5: -2..+6
+    if (times != expected) { std::printf("FAIL: asymmetric backward/forward\n"); return 1; }
+    std::printf("asymmetric 2 back / 6 forward: OK\n");
+    g_params[BT_FRAMES_BACKWARD-1].u.fs_d.value = 4;
+    g_params[BT_FRAMES_FORWARD-1].u.fs_d.value  = 4;
+  }
   std::printf("checkout times:"); for (auto& kv : g_checkTime) std::printf(" %d@%d", kv.first, kv.second); std::printf("\n");
   std::printf("ALL OK\n");
   return 0;

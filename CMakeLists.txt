@@ -43,10 +43,7 @@ if(NOT AE_SDK_ROOT)
   return()
 endif()
 
-set(AE_EX "${AE_SDK_ROOT}/Examples")
-if(NOT EXISTS "${AE_EX}/Headers/AE_Effect.h")
-  message(FATAL_ERROR "AE_SDK_ROOT does not look like the After Effects SDK: ${AE_EX}/Headers/AE_Effect.h not found")
-endif()
+include(cmake/CheckAESDK.cmake)  # sets AE_EX, verifies files and API
 set(AE_INCLUDES "${AE_EX}/Headers" "${AE_EX}/Headers/SP" "${AE_EX}/Util" "${AE_EX}/Resources")
 
 # --- Plug-in ------------------------------------------------------------------
@@ -68,7 +65,14 @@ target_include_directories(BrightTimes PRIVATE src src/gpu "${BT_GEN_DIR}" ${AE_
 add_dependencies(BrightTimes bt_kernel_source)
 
 if(BT_ENABLE_OPENCL)
-  find_package(OpenCL REQUIRED)
+  find_package(OpenCL)
+  if(NOT OpenCL_FOUND)
+    message(WARNING "OpenCL SDK not found (install the CUDA Toolkit or Khronos OpenCL-SDK): "
+                    "building without the OpenCL backend.")
+    set(BT_ENABLE_OPENCL OFF)
+  endif()
+endif()
+if(BT_ENABLE_OPENCL)
   target_sources(BrightTimes PRIVATE src/gpu/BrightTimesOpenCL.cpp)
   target_compile_definitions(BrightTimes PRIVATE BT_ENABLE_OPENCL CL_TARGET_OPENCL_VERSION=120)
   target_link_libraries(BrightTimes PRIVATE OpenCL::OpenCL)

@@ -10,6 +10,7 @@
 #include "BrightTimesCore.h"
 #include "gpu/BrightTimesGPU.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -111,8 +112,8 @@ PF_Err ReadSettings(PF_InData* in_data, bt::Settings& s)
 {
     ParamReader r(in_data);
 
-    s.framesBackward  = r.Int(BT_FRAMES_BACKWARD);
-    s.framesForward   = r.Int(BT_FRAMES_FORWARD);
+    s.framesBackward  = static_cast<int>(std::lround(r.Float(BT_FRAMES_BACKWARD)));
+    s.framesForward   = static_cast<int>(std::lround(r.Float(BT_FRAMES_FORWARD)));
     s.frameStep       = r.Int(BT_FRAME_STEP);
     s.includeCurrent  = r.Bool(BT_INCLUDE_CURRENT);
     s.currentUntinted = r.Bool(BT_CURRENT_UNTINTED);
@@ -148,11 +149,15 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data)
     PF_ParamDef def;
 
     // --- Time sampling -----------------------------------------------------
+    // Independent counts for each direction: numeric field + slider over the full
+    // range, whole frames only (precision 0), keyframable.
     AEFX_CLR_STRUCT(def);
-    PF_ADD_SLIDER("Frames Backward", 0, bt::kMaxFrames, 0, 20, 4, ID_FRAMES_BACKWARD);
+    PF_ADD_FLOAT_SLIDERX("Frames Backward", 0, bt::kMaxFrames, 0, bt::kMaxFrames, 4, 0,
+                         PF_ValueDisplayFlag_NONE, 0, ID_FRAMES_BACKWARD);
 
     AEFX_CLR_STRUCT(def);
-    PF_ADD_SLIDER("Frames Forward", 0, bt::kMaxFrames, 0, 20, 4, ID_FRAMES_FORWARD);
+    PF_ADD_FLOAT_SLIDERX("Frames Forward", 0, bt::kMaxFrames, 0, bt::kMaxFrames, 4, 0,
+                         PF_ValueDisplayFlag_NONE, 0, ID_FRAMES_FORWARD);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Frame Step", 1, 100, 1, 10, 1, ID_FRAME_STEP);
