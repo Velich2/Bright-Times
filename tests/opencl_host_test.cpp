@@ -48,9 +48,14 @@ static PF_Err checkin_param(PF_ProgPtr, PF_ParamDef*) { return 0; }
 static PF_Err abort_cb(PF_ProgPtr) { return 0; }
 static std::map<A_long, A_long> g_checkTime; static std::map<A_long, World*> g_pix; static World* g_out;
 static PF_Err checkout_layer(PF_ProgPtr, PF_ParamIndex, A_long id, const PF_RenderRequest*, A_long t, A_long, A_u_long, PF_CheckoutResult* r) { g_checkTime[id]=t; r->result_rect={0,0,W,H}; r->max_result_rect={0,0,W,H}; return 0; }
-static PF_Err checkout_layer_pixels(PF_ProgPtr, A_long id, PF_EffectWorld** w) { g_pix[id] = renderFrame(g_checkTime[id]); *w = &g_pix[id]->w; return 0; }
+// AE rule (error 25::244): the output may only be checked out after at least
+// one input has been checked out in this render.
+static int g_inputCheckouts = 0;
+static PF_Err checkout_layer_pixels(PF_ProgPtr, A_long id, PF_EffectWorld** w) { ++g_inputCheckouts; g_pix[id] = renderFrame(g_checkTime[id]); *w = &g_pix[id]->w; return 0; }
 static PF_Err checkin_layer_pixels(PF_ProgPtr, A_long id) { if (g_gpu) clFinish(g_q); freeWorld(g_pix[id]); g_pix.erase(id); return 0; }
-static PF_Err checkout_output(PF_ProgPtr, PF_EffectWorld** w) { *w = &g_out->w; return 0; }
+static PF_Err checkout_output(PF_ProgPtr, PF_EffectWorld** w) {
+  if (g_inputCheckouts == 0) { std::printf("FAIL: output checked out before any input (AE 25::244)\n"); return PF_Err_BAD_CALLBACK_PARAM; }
+  *w = &g_out->w; return 0; }
 static PF_Err getfmt(const PF_EffectWorld*, PF_PixelFormat* f) { *f = g_gpu ? (A_long)PF_PixelFormat_GPU_BGRA128 : (A_long)PF_PixelFormat_ARGB128; return 0; }
 static PF_Err iterate_generic(A_long n, void* ref, PF_Err (*fn)(void*, A_long, A_long, A_long)) { for (A_long i=0;i<n;++i) if (PF_Err e = fn(ref,0,i,n)) return e; return 0; }
 static PF_Err devinfo(PF_ProgPtr, A_u_long, PF_GPUDeviceInfo* i) { i->device_framework = PF_GPU_Framework_OPENCL; i->devicePV = g_dev; i->contextPV = g_ctx; i->command_queuePV = g_q; return 0; }
@@ -71,6 +76,7 @@ static std::vector<float> run(bool gpu) {  // returns RGBA straight per pixel
   g_out = newWorld(W, H, 0, 0); upload(g_out);
   PF_SmartRenderInput sin{}; sin.pre_render_data = pout.pre_render_data; sin.what_gpu = pin.what_gpu; sin.gpu_data = g_gpuData;
   PF_SmartRenderCallbacks scb{checkout_layer_pixels, checkin_layer_pixels, checkout_output}; PF_SmartRenderExtra sex{&sin,&scb};
+  g_inputCheckouts = 0;
   if (PF_Err e = EffectMain(gpu ? PF_Cmd_SMART_RENDER_GPU : PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex)) { printf("render %d\n", e); exit(1); }
   pout.delete_pre_render_data_func(pout.pre_render_data);
   if (gpu) clFinish(g_q);

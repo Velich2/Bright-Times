@@ -447,7 +447,7 @@ PF_Err FinalizeRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*iterati
 
 template <typename P>
 PF_Err RenderWorld(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderData& rd,
-                   PF_EffectWorld* out)
+                   PF_EffectWorld* out, const PF_EffectWorld* current)
 {
     PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
     if (out->width <= 0 || out->height <= 0) return err;
@@ -470,13 +470,10 @@ PF_Err RenderWorld(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderD
         ERR(PF_ABORT(in_data));
     }
 
-    PF_EffectWorld* current = nullptr;
-    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, kCurrentFrameCheckoutId, &current));
     if (!err) {
         FinalizeCtx ctx{out, current, s.blendMode, s.mix, acc.data()};
         ERR(iter->iterate_generic(out->height, &ctx, FinalizeRowFn<P>));
     }
-    ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, kCurrentFrameCheckoutId));
     return err;
 }
 
@@ -546,7 +543,7 @@ void MapGpuSource(const PF_EffectWorld* out, const PF_EffectWorld* src, void* me
 }
 
 PF_Err RenderGPU(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderData& rd,
-                 PF_EffectWorld* out)
+                 PF_EffectWorld* out, PF_EffectWorld* current)
 {
     PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
 
@@ -602,16 +599,13 @@ PF_Err RenderGPU(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderDat
         ERR(PF_ABORT(in_data));
     }
 
-    PF_EffectWorld* current    = nullptr;
-    void*           currentMem = nullptr;
-    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, kCurrentFrameCheckoutId, &current));
+    void* currentMem = nullptr;
     if (!err && current) ERR(gpu->GetGPUWorldData(in_data->effect_ref, current, &currentMem));
     if (!err) {
         BtGpuParams p = base;
         MapGpuSource(out, current, currentMem, p);
         dispatch(BT_KERNEL_FINALIZE, currentMem, p);
     }
-    ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, kCurrentFrameCheckoutId));
     return err;
 }
 
@@ -710,28 +704,39 @@ PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra, bool gpu)
     const RenderData* rd = static_cast<const RenderData*>(extra->input->pre_render_data);
     if (!rd) return PF_Err_BAD_CALLBACK_PARAM;
 
+    // AE requires at least one input to be checked out before the output. The
+    // unmodified current frame (needed for Mix) is held for the whole render.
+    PF_Err          err2    = PF_Err_NONE;
+    PF_EffectWorld* current = nullptr;
+    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, kCurrentFrameCheckoutId, &current));
+
     PF_EffectWorld* out = nullptr;
     ERR(extra->cb->checkout_output(in_data->effect_ref, &out));
-    if (err || !out) return err;
+    if (!err && !out) err = PF_Err_BAD_CALLBACK_PARAM;
 
-    if (gpu) {
-        if (extra->input->what_gpu == PF_GPU_Framework_NONE) return PF_Err_BAD_CALLBACK_PARAM;
-        return RenderGPU(in_data, extra, *rd, out);
+    if (!err) {
+        if (gpu) {
+            err = (extra->input->what_gpu == PF_GPU_Framework_NONE)
+                      ? PF_Err_BAD_CALLBACK_PARAM
+                      : RenderGPU(in_data, extra, *rd, out, current);
+        } else {
+            PF_PixelFormat fmt = PF_PixelFormat_INVALID;
+            SuiteScope<PF_WorldSuite2> ws(in_data, kPFWorldSuite, kPFWorldSuiteVersion2);
+            if (!ws) err = PF_Err_BAD_CALLBACK_PARAM;
+            ERR(ws->PF_GetPixelFormat(out, &fmt));
+            if (!err) {
+                switch (fmt) {
+                    case PF_PixelFormat_ARGB128: err = RenderWorld<PF_PixelFloat>(in_data, extra, *rd, out, current); break;
+                    case PF_PixelFormat_ARGB64:  err = RenderWorld<PF_Pixel16>(in_data, extra, *rd, out, current); break;
+                    case PF_PixelFormat_ARGB32:  err = RenderWorld<PF_Pixel8>(in_data, extra, *rd, out, current); break;
+                    default:                     err = PF_Err_BAD_CALLBACK_PARAM; break;
+                }
+            }
+        }
     }
 
-    SuiteScope<PF_WorldSuite2> ws(in_data, kPFWorldSuite, kPFWorldSuiteVersion2);
-    if (!ws) return PF_Err_BAD_CALLBACK_PARAM;
-
-    PF_PixelFormat fmt = PF_PixelFormat_INVALID;
-    ERR(ws->PF_GetPixelFormat(out, &fmt));
-    if (err) return err;
-
-    switch (fmt) {
-        case PF_PixelFormat_ARGB128: return RenderWorld<PF_PixelFloat>(in_data, extra, *rd, out);
-        case PF_PixelFormat_ARGB64:  return RenderWorld<PF_Pixel16>(in_data, extra, *rd, out);
-        case PF_PixelFormat_ARGB32:  return RenderWorld<PF_Pixel8>(in_data, extra, *rd, out);
-        default:                     return PF_Err_BAD_CALLBACK_PARAM;
-    }
+    ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, kCurrentFrameCheckoutId));
+    return err;
 }
 
 }  // namespace

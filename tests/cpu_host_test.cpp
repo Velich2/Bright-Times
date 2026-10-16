@@ -49,10 +49,15 @@ static PF_Err checkout_layer(PF_ProgPtr, PF_ParamIndex idx, A_long id, const PF_
   if (idx != 0) return PF_Err_BAD_CALLBACK_PARAM;
   g_checkTime[id] = t; r->result_rect = {0,0,W,H}; r->max_result_rect = {0,0,W,H}; return 0; }
 static std::map<A_long, Frame*> g_pix;
-static PF_Err checkout_layer_pixels(PF_ProgPtr, A_long id, PF_EffectWorld** w) { if (!g_checkTime.count(id)) return PF_Err_BAD_CALLBACK_PARAM; g_pix[id] = renderFrame(g_checkTime[id]); *w = &g_pix[id]->w; return 0; }
+// AE rule (error 25::244): the output may only be checked out after at least
+// one input has been checked out in this render.
+static int g_inputCheckouts = 0;
+static PF_Err checkout_layer_pixels(PF_ProgPtr, A_long id, PF_EffectWorld** w) { ++g_inputCheckouts; if (!g_checkTime.count(id)) return PF_Err_BAD_CALLBACK_PARAM; g_pix[id] = renderFrame(g_checkTime[id]); *w = &g_pix[id]->w; return 0; }
 static PF_Err checkin_layer_pixels(PF_ProgPtr, A_long id) { delete g_pix[id]; g_pix.erase(id); return 0; }
 static Frame* g_output;
-static PF_Err checkout_output(PF_ProgPtr, PF_EffectWorld** w) { *w = &g_output->w; return 0; }
+static PF_Err checkout_output(PF_ProgPtr, PF_EffectWorld** w) {
+  if (g_inputCheckouts == 0) { std::printf("FAIL: output checked out before any input (AE 25::244)\n"); return PF_Err_BAD_CALLBACK_PARAM; }
+  *w = &g_output->w; return 0; }
 static PF_Err getfmt(const PF_EffectWorld*, PF_PixelFormat* f) { *f = g_fmt; return 0; }
 static std::vector<std::string> g_threads;
 static PF_Err iterate_generic(A_long n, void* ref, PF_Err (*fn)(void*, A_long, A_long, A_long)) { for (A_long i=0;i<n;++i) { PF_Err e = fn(ref, 0, i, n); if (e) return e; } return 0; }
@@ -106,6 +111,7 @@ int main(int argc, char** argv) {
     g_output = makeWorld();
     PF_SmartRenderInput sin{}; sin.pre_render_data = pout.pre_render_data; PF_SmartRenderCallbacks scb{checkout_layer_pixels, checkin_layer_pixels, checkout_output};
     PF_SmartRenderExtra sex{&sin, &scb};
+    g_inputCheckouts = 0;
     e = EffectMain(PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex);
     if (e) { std::printf("render err %d\n", e); return 1; }
     pout.delete_pre_render_data_func(pout.pre_render_data);
