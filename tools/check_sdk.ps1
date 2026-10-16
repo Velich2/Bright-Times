@@ -9,6 +9,13 @@ param(
 )
 
 $ok = $true
+
+# Installers update PATH / CUDA_PATH in the registry; reload them so a window
+# opened before the installation still sees the new tools.
+$env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+            [Environment]::GetEnvironmentVariable("Path", "User")
+$machineCuda = [Environment]::GetEnvironmentVariable("CUDA_PATH", "Machine")
+if ($machineCuda) { $env:CUDA_PATH = $machineCuda }
 function Good($msg) { Write-Host "  [OK]      $msg" -ForegroundColor Green }
 function Bad($msg)  { Write-Host "  [MISSING] $msg" -ForegroundColor Red; $script:ok = $false }
 function Warn($msg) { Write-Host "  [WARN]    $msg" -ForegroundColor Yellow }
@@ -73,11 +80,19 @@ $ver = Select-String -Path (Join-Path $examples "Headers\AE_Effect.h") -Pattern 
 if ($ver) { Write-Host "  API version: $($ver -join '.')" }
 
 Write-Host "`n== Build tools ==" -ForegroundColor Cyan
-$cmake = Get-Command cmake -ErrorAction SilentlyContinue
-if ($cmake) { Good ("cmake: " + (& cmake --version | Select-Object -First 1)) }
-else { Bad "cmake not in PATH (run from 'Developer PowerShell for VS' in the Start menu)" }
-
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$cmake = $null
+$cmd = Get-Command cmake -ErrorAction SilentlyContinue
+if ($cmd) { $cmake = $cmd.Source }
+if (-not $cmake -and (Test-Path $vswhere)) {
+    foreach ($vsPath in (& $vswhere -all -products * -property installationPath)) {
+        $candidate = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+        if (Test-Path $candidate) { $cmake = $candidate; break }
+    }
+}
+if ($cmake) { Good ("cmake: " + (& $cmake --version | Select-Object -First 1) + "  ($cmake)") }
+else { Bad "cmake (Visual Studio Installer -> Modify -> check 'C++ CMake tools for Windows')" }
+
 if (Test-Path $vswhere) {
     $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property displayName
     if ($vs) { Good "Visual Studio C++: $vs" } else { Bad "Visual Studio with 'Desktop development with C++'" }
@@ -86,8 +101,22 @@ if (Test-Path $vswhere) {
 }
 
 # GPU backends (optional)
-$nvcc = Get-Command nvcc -ErrorAction SilentlyContinue
-if ($nvcc) { Good "CUDA Toolkit (nvcc) - build with -DBT_ENABLE_CUDA=ON" } else { Warn "CUDA Toolkit not found - CUDA backend off (OpenCL still works on NVIDIA)" }
+$nvcc = $null
+if ($env:CUDA_PATH -and (Test-Path (Join-Path $env:CUDA_PATH "bin\nvcc.exe"))) { $nvcc = Join-Path $env:CUDA_PATH "bin\nvcc.exe" }
+if (-not $nvcc) {
+    $cudaBase = "${env:ProgramFiles}\NVIDIA GPU Computing Toolkit\CUDA"
+    if (Test-Path $cudaBase) {
+        $hit = Get-ChildItem $cudaBase -Directory | ForEach-Object { Join-Path $_.FullName "bin\nvcc.exe" } |
+               Where-Object { Test-Path $_ } | Select-Object -Last 1
+        if ($hit) { $nvcc = $hit }
+    }
+}
+if ($nvcc) {
+    $nvccVer = (& $nvcc --version | Select-String "release") -replace ".*release ", ""
+    Good "CUDA Toolkit: $nvccVer  ($nvcc)"
+} else {
+    Warn "CUDA Toolkit not found - CUDA backend off (OpenCL still works on NVIDIA)"
+}
 
 # OpenCL needs no SDK: the plug-in loads OpenCL.dll from the GPU driver at runtime.
 if (Test-Path "$env:SystemRoot\System32\OpenCL.dll") { Good "OpenCL runtime (OpenCL.dll from the GPU driver)" } else { Warn "OpenCL.dll not found - OpenCL GPU path unavailable on this machine (CPU still works)" }
