@@ -61,21 +61,37 @@ void Teardown(int fw, void* data)
     }
 }
 
-bool Dispatch(const Device& dev, int kernel, void* src, void* dst, const BtGpuParams& p)
+bool Dispatch(const Device& dev, int kernel, void* src, void* dst, void* out, const BtGpuParams& p)
 {
-    (void)kernel; (void)src; (void)dst;  // unused when no backend is compiled in
+    (void)kernel; (void)src; (void)dst; (void)out;  // unused when no backend is compiled in
     if (p.width <= 0 || p.height <= 0) return true;
     switch (dev.framework) {
 #ifdef BT_ENABLE_OPENCL
-        case kOpenCL: return OpenCLDispatch(dev, kernel, src, dst, p);
+        case kOpenCL: return OpenCLDispatch(dev, kernel, src, dst, out, p);
 #endif
 #ifdef BT_ENABLE_METAL
-        case kMetal: return MetalDispatch(dev, kernel, src, dst, p);
+        case kMetal: return MetalDispatch(dev, kernel, src, dst, out, p);
 #endif
 #ifdef BT_ENABLE_CUDA
         case kCUDA:
             return CUDADispatch(kernel, static_cast<const float*>(src ? src : dst),
-                                static_cast<float*>(dst), p);
+                                static_cast<float*>(dst), static_cast<float*>(out ? out : dst), p);
+#endif
+        default: return false;
+    }
+}
+
+bool Finish(const Device& dev)
+{
+    switch (dev.framework) {
+#ifdef BT_ENABLE_OPENCL
+        case kOpenCL: return OpenCLFinish(dev);
+#endif
+#ifdef BT_ENABLE_METAL
+        case kMetal: return MetalFinish(dev);
+#endif
+#ifdef BT_ENABLE_CUDA
+        case kCUDA: return CUDAFinish();
 #endif
         default: return false;
     }

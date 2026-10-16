@@ -8,6 +8,7 @@
 
 #include "BrightTimes.h"
 #include "BrightTimesCore.h"
+#include "BrightTimesSettings.h"
 #include "gpu/BrightTimesGPU.h"
 
 #include <cmath>
@@ -119,37 +120,7 @@ private:
 PF_Err ReadSettings(PF_InData* in_data, bt::Settings& s)
 {
     ParamReader r(in_data);
-
-    s.framesBackward  = static_cast<int>(std::lround(r.Float(BT_FRAMES_BACKWARD)));
-    s.framesForward   = static_cast<int>(std::lround(r.Float(BT_FRAMES_FORWARD)));
-    s.frameStep       = r.Int(BT_FRAME_STEP);
-    s.includeCurrent  = r.Bool(BT_INCLUDE_CURRENT);
-    s.currentUntinted = r.Bool(BT_CURRENT_UNTINTED);
-
-    s.groups          = r.Int(BT_GROUPS);
-    s.groupMode       = static_cast<bt::GroupMode>(r.Popup(BT_GROUP_MODE));
-    s.colorOrder      = static_cast<bt::ColorOrder>(r.Popup(BT_COLOR_ORDER));
-    s.groupSoftness   = r.Float(BT_GROUP_SOFTNESS) / 100.f;
-    s.colorMode       = static_cast<bt::ColorMode>(r.Popup(BT_COLOR_MODE));
-    s.hueStart        = r.AngleDeg(BT_HUE_START);
-    s.hueRange        = r.Float(BT_HUE_RANGE);
-    s.saturation      = r.Float(BT_SATURATION) / 100.f;
-    s.reverseColors   = r.Bool(BT_REVERSE_COLORS);
-    s.customCount     = r.Int(BT_PALETTE_SIZE);
-    for (int i = 0; i < bt::kMaxCustomColor; ++i) {
-        s.custom[i] = r.Color(static_cast<PF_ParamIndex>(BT_COLOR_1 + i));
-    }
-
-    s.falloffBackward = r.Float(BT_FALLOFF_BACKWARD) / 100.f;
-    s.falloffForward  = r.Float(BT_FALLOFF_FORWARD) / 100.f;
-    s.falloffCurve    = r.Float(BT_FALLOFF_CURVE);
-
-    s.tintMode        = static_cast<bt::TintMode>(r.Popup(BT_TINT_MODE));
-    s.blendMode       = static_cast<bt::BlendMode>(r.Popup(BT_BLEND_MODE));
-    s.colorBalance    = r.Float(BT_COLOR_BALANCE) / 100.f;
-    s.intensity       = r.Float(BT_INTENSITY) / 100.f;
-    s.mix             = 1.f - r.Float(BT_BLEND_ORIGINAL) / 100.f;  // mix = share of the effect
-
+    ReadSettingsFrom(r, s);
     return r.err();
 }
 
@@ -700,7 +671,7 @@ PF_Err RenderGPU(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderDat
     base.gain     = s.intensity;
 
     auto dispatch = [&](int kernel, void* src, const BtGpuParams& p) {
-        if (!err && !btgpu::Dispatch(dev, kernel, src, dstMem, p)) err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+        if (!err && !btgpu::Dispatch(dev, kernel, src, dstMem, nullptr, p)) err = PF_Err_INTERNAL_STRUCT_DAMAGED;
     };
 
     // The output world is the accumulation buffer.

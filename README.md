@@ -59,7 +59,12 @@ tools/preview.cpp          офлайн-превью алгоритма
 
 * **SmartFX + Multi-Frame Rendering**, 8 / 16 / 32 bpc на CPU.
 * **GPU (32-bit float)**: CUDA, OpenCL, Metal — AE сам выбирает, если в *Project Settings → Video Rendering and Effects* стоит Mercury GPU Acceleration. Если фреймворк не поддержан сборкой (например, DirectX), AE автоматически рендерит на CPU.
-* **Premiere Pro**: Premiere не поддерживает SmartFX и GPU-путь After Effects, поэтому там
+* **Premiere Pro, GPU** (`src/premiere/`): отдельная точка входа `xGPUFilterEntry` (GPU API Premiere,
+  CUDA / Metal, кадры 32f и 16f). Соседние кадры запрашиваются через GetFrameDependencies, Clip Edges
+  учитывается. Нужен Premiere Pro SDK (`-DPR_SDK_ROOT=...`, `build.ps1` ищет его сам). С палитрой
+  Custom GPU-фильтр отказывается и Premiere рендерит этот клип на CPU (кодировка цветов в GPU API
+  не документирована).
+* **Premiere Pro, CPU**: Premiere не поддерживает SmartFX и GPU-путь After Effects, поэтому без GPU
   работает классический рендер (`PF_Cmd_RENDER`, соседние кадры через `PF_CHECKOUT_PARAM`):
   та же математика на CPU, в родных форматах Premiere: BGRA 32-bit float (когда в последовательности
   включена максимальная глубина / Render at Maximum Depth) или 8 бит. Плагин ставится в ту же папку MediaCore и появляется в обеих программах.
@@ -135,6 +140,7 @@ cmake --build build-tests && ctest --test-dir build-tests --output-on-failure
 ```
 
 * `cpu_host` — мок-хост прогоняет `EffectMain` (GLOBAL_SETUP → PARAMS_SETUP → UPDATE_PARAMS_UI → PRE_RENDER → SMART_RENDER) в 8/16/32 bpc для всех режимов; проверяет совпадение флагов с PiPL, баланс checkout/checkin и что в Optical статичные пиксели не меняются.
+* `premiere_gpu` — мок-хост Premiere гоняет `xGPUFilterEntry` (CreateInstance, GetFrameDependencies, Render) с кадрами в буферах OpenCL и сравнивает с независимым CPU-эталоном: 32f точно, 16f в пределах точности half, Clip Edges, отказ при Custom Palette.
 * `opencl_host` — тот же путь на GPU через OpenCL (подойдёт и CPU-реализация, например pocl) и сравнение с CPU: расхождение ≤ 2·10⁻⁷.
 * `bt_preview <dir>` — рендер синтетической сцены в PPM.
 

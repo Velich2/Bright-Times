@@ -13,11 +13,15 @@
 
   Options:
     -SdkRoot    After Effects SDK folder
+    -PrSdkRoot  Premiere Pro SDK folder (GPU rendering in Premiere). Default: the
+                first folder in your user profile whose name contains
+                "Premiere" and "SDK"; "none" to build without it
     -Cuda       auto (default: on if the CUDA Toolkit is found) | on | off
     -NoInstall  only build, do not copy into the Adobe plug-in folder
 #>
 param(
     [string]$SdkRoot = "C:\Users\Velich\AfterEffectsSDK_26.5_win",
+    [string]$PrSdkRoot = "",
     [ValidateSet("auto", "on", "off")][string]$Cuda = "auto",
     [string]$Config = "Release",
     [switch]$NoInstall,
@@ -79,10 +83,21 @@ if ($Cuda -eq "on" -and -not $cudaRoot) { Fail "CUDA Toolkit not found (nvcc.exe
 if ($Cuda -ne "off" -and $cudaRoot) { $useCuda = $true }
 if ($cudaRoot) { Write-Host "  CUDA Toolkit: $cudaRoot" } else { Write-Host "  CUDA Toolkit: not found (building without CUDA; OpenCL + CPU still work)" -ForegroundColor Yellow }
 
+# --- Premiere Pro SDK (optional): GPU rendering inside Premiere Pro
+if ($PrSdkRoot -eq "") {
+    $found = Get-ChildItem -Path $env:USERPROFILE -Directory -ErrorAction SilentlyContinue |
+             Where-Object { $_.Name -match "Premiere" -and $_.Name -match "SDK" } | Select-Object -First 1
+    if ($found) { $PrSdkRoot = $found.FullName }
+}
+if ($PrSdkRoot -eq "none") { $PrSdkRoot = "" }
+if ($PrSdkRoot) { Write-Host "  Premiere Pro SDK: $PrSdkRoot" }
+else { Write-Host "  Premiere Pro SDK: not found (Premiere renders on the CPU; pass -PrSdkRoot to enable its GPU path)" -ForegroundColor Yellow }
+
 # --- Configure
 function Configure([bool]$withCuda) {
     if (Test-Path (Join-Path $build "CMakeCache.txt")) { Remove-Item -Recurse -Force $build }
     $cmakeArgs = @("-S", $repo, "-B", $build, "-A", "x64", "-DAE_SDK_ROOT=$SdkRoot")
+    if ($PrSdkRoot) { $cmakeArgs += "-DPR_SDK_ROOT=$PrSdkRoot" }
     if ($withCuda) {
         # Point Visual Studio at this toolkit directly: works even when the CUDA
         # Visual Studio integration was not installed (e.g. CUDA installed before VS).
@@ -115,7 +130,9 @@ if ($LASTEXITCODE -ne 0) { Fail "Build failed (see above)." }
 $aex = Join-Path $build "$Config\BrightTimes.aex"
 if (-not (Test-Path $aex)) { Fail "Build finished but $aex was not found." }
 Write-Host "`nBuilt: $aex" -ForegroundColor Green
-Write-Host ("GPU backends: OpenCL" + $(if ($useCuda) { " + CUDA" } else { "" }) + ", CPU fallback")
+Write-Host ("GPU in After Effects: OpenCL" + $(if ($useCuda) { " + CUDA" } else { "" }) + ", CPU fallback")
+if ($PrSdkRoot -and $useCuda) { Write-Host "GPU in Premiere Pro: CUDA, CPU fallback" }
+else { Write-Host ("Premiere Pro: CPU (32-bit float)" + $(if ($PrSdkRoot) { " - Premiere needs CUDA for its GPU path" } else { "" })) }
 
 # --- Install
 $target    = "${env:ProgramFiles}\Adobe\Common\Plug-ins\7.0\MediaCore\BrightTimes"

@@ -63,7 +63,8 @@ Api LoadApi(bool& ok)
          Bind(lib, "clReleaseKernel", api.ReleaseKernel) &&
          Bind(lib, "clReleaseProgram", api.ReleaseProgram) &&
          Bind(lib, "clSetKernelArg", api.SetKernelArg) &&
-         Bind(lib, "clEnqueueNDRangeKernel", api.EnqueueNDRangeKernel);
+         Bind(lib, "clEnqueueNDRangeKernel", api.EnqueueNDRangeKernel) &&
+         Bind(lib, "clFinish", api.Finish);
     return api;
 }
 }  // namespace
@@ -133,7 +134,7 @@ void OpenCLTeardown(void* p)
     delete data;
 }
 
-bool OpenCLDispatch(const Device& dev, int kernel, void* src, void* dst, const BtGpuParams& p)
+bool OpenCLDispatch(const Device& dev, int kernel, void* src, void* dst, void* out, const BtGpuParams& p)
 {
     OpenCLData* data = static_cast<OpenCLData*>(const_cast<void*>(dev.data));
     const Api*  cl   = Load();
@@ -143,16 +144,24 @@ bool OpenCLDispatch(const Device& dev, int kernel, void* src, void* dst, const B
     cl_kernel        k      = data->kernels[kernel];
     cl_mem           srcMem = static_cast<cl_mem>(src ? src : dst);
     cl_mem           dstMem = static_cast<cl_mem>(dst);
+    cl_mem           outMem = static_cast<cl_mem>(out ? out : dst);
 
     std::lock_guard<std::mutex> guard(data->lock);
     cl_int res = cl->SetKernelArg(k, 0, sizeof(cl_mem), &srcMem);
     if (res == CL_SUCCESS) res = cl->SetKernelArg(k, 1, sizeof(cl_mem), &dstMem);
-    if (res == CL_SUCCESS) res = cl->SetKernelArg(k, 2, sizeof(BtGpuParams), &p);
+    if (res == CL_SUCCESS) res = cl->SetKernelArg(k, 2, sizeof(cl_mem), &outMem);
+    if (res == CL_SUCCESS) res = cl->SetKernelArg(k, 3, sizeof(BtGpuParams), &p);
     if (res == CL_SUCCESS) {
         const size_t global[2] = {static_cast<size_t>(p.width), static_cast<size_t>(p.height)};
         res = cl->EnqueueNDRangeKernel(queue, k, 2, nullptr, global, nullptr, 0, nullptr, nullptr);
     }
     return res == CL_SUCCESS;
+}
+
+bool OpenCLFinish(const Device& dev)
+{
+    const Api* cl = Load();
+    return cl && cl->Finish(static_cast<cl_command_queue>(dev.queue)) == CL_SUCCESS;
 }
 
 }  // namespace btgpu

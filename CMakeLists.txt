@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(AE_SDK_ROOT "" CACHE PATH "After Effects SDK root (the folder that contains Examples/)")
+set(PR_SDK_ROOT "" CACHE PATH "Premiere Pro SDK root - optional, enables GPU rendering in Premiere Pro")
 option(BT_BUILD_TESTS "Build the offline tests (no AE SDK needed)" OFF)
 
 if(WIN32)
@@ -110,6 +111,23 @@ if(BT_ENABLE_METAL)
   set_source_files_properties(src/gpu/BrightTimesMetal.mm PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
   target_compile_definitions(BrightTimes PRIVATE BT_ENABLE_METAL)
   target_link_libraries(BrightTimes PRIVATE "-framework Metal" "-framework Foundation")
+endif()
+
+# --- Premiere Pro GPU filter (xGPUFilterEntry). Premiere renders on the GPU
+# through CUDA (Windows) or Metal (macOS); without the Premiere SDK it uses the
+# software path (32-bit float on the CPU).
+if(PR_SDK_ROOT)
+  include(cmake/CheckPrSDK.cmake)  # sets PR_SDK_HEADERS
+  target_sources(BrightTimes PRIVATE src/premiere/BrightTimesPremiereGPU.cpp)
+  set_source_files_properties(src/premiere/BrightTimesPremiereGPU.cpp PROPERTIES
+    INCLUDE_DIRECTORIES "${PR_SDK_HEADERS}")
+  target_compile_definitions(BrightTimes PRIVATE BT_PREMIERE_GPU)
+  if(NOT BT_ENABLE_CUDA AND NOT BT_ENABLE_METAL)
+    message(WARNING "Premiere GPU filter built without CUDA/Metal: Premiere will use the CPU path. "
+                    "Enable BT_ENABLE_CUDA (Windows) or BT_ENABLE_METAL (macOS).")
+  endif()
+else()
+  message(STATUS "PR_SDK_ROOT not set: no GPU rendering in Premiere Pro (CPU path is used there)")
 endif()
 
 if(WIN32)

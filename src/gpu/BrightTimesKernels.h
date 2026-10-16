@@ -9,10 +9,13 @@
  *   - Host   : without any BT_LANG_* define it is plain C/C++ (parameter struct
  *              for the host code + CPU reference used by the tests).
  *
- * Memory layout: AE GPU worlds are PF_PixelFormat_GPU_BGRA128 (4 x float, B G R A,
- * straight alpha). The output world doubles as the accumulation buffer: during
- * accumulation it holds premultiplied R G B A, bt_finalize converts it back
- * in place. The math mirrors BrightTimesCore.h (AccumulatePixel / FinalizePixel).
+ * Memory layout: GPU frames are B G R A, straight alpha, 32-bit float
+ * (AE PF_PixelFormat_GPU_BGRA128, Premiere GPU_BGRA_4444_32f) or 16-bit half
+ * (Premiere GPU_BGRA_4444_16f; srcHalf / outHalf). The accumulation buffer `dst`
+ * is always 32-bit float premultiplied R G B A. bt_finalize writes the result
+ * either back into `dst` (AE: the output world is the accumulator) or into a
+ * separate `out` buffer (hasOut, Premiere). The math mirrors BrightTimesCore.h
+ * (AccumulatePixel / FinalizePixel).
  *
  * Keep this file free of comments containing the raw-string terminator
  * sequence used by EmbedKernel.cmake.
@@ -36,6 +39,90 @@
     #define BT_LANG_HOST 1
     #define BT_FN static inline
     #define BT_GLOBAL
+    #include <string.h>
+#endif
+
+/* ------------------------------------------------------------------------ */
+/* Element access: 32-bit float or 16-bit half storage.                     */
+/* ------------------------------------------------------------------------ */
+#if defined(BT_LANG_OPENCL)
+BT_FN float bt_ld(__global const float* p, int i, int h)
+{
+    return h ? vload_half(i, (__global const half*)p) : p[i];
+}
+BT_FN void bt_st(__global float* p, int i, int h, float v)
+{
+    if (h) vstore_half(v, i, (__global half*)p); else p[i] = v;
+}
+#elif defined(BT_LANG_METAL)
+BT_FN float bt_ld(device const float* p, int i, int h)
+{
+    return h ? float(((device const half*)p)[i]) : p[i];
+}
+BT_FN void bt_st(device float* p, int i, int h, float v)
+{
+    if (h) ((device half*)p)[i] = half(v); else p[i] = v;
+}
+#elif defined(BT_LANG_CUDA)
+BT_FN float bt_ld(const float* p, int i, int h)
+{
+    return h ? __half2float(((const __half*)p)[i]) : p[i];
+}
+BT_FN void bt_st(float* p, int i, int h, float v)
+{
+    if (h) ((__half*)p)[i] = __float2half(v); else p[i] = v;
+}
+#else
+/* Host reference: IEEE 754 half <-> float. */
+BT_FN float bt_half_to_float(unsigned short h)
+{
+    unsigned int sign = (unsigned int)(h & 0x8000u) << 16;
+    unsigned int exp  = (h >> 10) & 0x1Fu;
+    unsigned int man  = h & 0x3FFu;
+    unsigned int bits;
+    if (exp == 0) {
+        if (man == 0) {
+            bits = sign;
+        } else { /* subnormal */
+            exp = 127 - 15 + 1;
+            while ((man & 0x400u) == 0) { man <<= 1; --exp; }
+            man &= 0x3FFu;
+            bits = sign | (exp << 23) | (man << 13);
+        }
+    } else if (exp == 31) {
+        bits = sign | 0x7F800000u | (man << 13);
+    } else {
+        bits = sign | ((exp - 15 + 127) << 23) | (man << 13);
+    }
+    float f;
+    memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+BT_FN unsigned short bt_float_to_half(float f)
+{
+    unsigned int bits;
+    memcpy(&bits, &f, sizeof(bits));
+    unsigned int sign = (bits >> 16) & 0x8000u;
+    int          exp  = (int)((bits >> 23) & 0xFFu) - 127 + 15;
+    unsigned int man  = bits & 0x7FFFFFu;
+    if (exp <= 0) {
+        if (exp < -10) return (unsigned short)sign;
+        man = (man | 0x800000u) >> (1 - exp);
+        return (unsigned short)(sign | ((man + 0x1000u) >> 13));
+    }
+    if (exp >= 31) return (unsigned short)(sign | 0x7C00u);
+    unsigned int r = sign | ((unsigned int)exp << 10) | (man >> 13);
+    if (man & 0x1000u) r += 1; /* round half up */
+    return (unsigned short)r;
+}
+BT_FN float bt_ld(const float* p, int i, int h)
+{
+    return h ? bt_half_to_float(((const unsigned short*)p)[i]) : p[i];
+}
+BT_FN void bt_st(float* p, int i, int h, float v)
+{
+    if (h) ((unsigned short*)p)[i] = bt_float_to_half(v); else p[i] = v;
+}
 #endif
 
 /* Must match bt::BlendMode / bt::TintMode in BrightTimesCore.h. */
@@ -70,6 +157,10 @@ typedef struct BtGpuParams {
     float mix;
     float initValue;
     float gain;        /* Intensity, used by Tinted Trails in bt_finalize */
+    int   srcHalf;     /* source / current frame is 16-bit half */
+    int   hasOut;      /* finalize into `out` instead of in place */
+    int   outPitch;    /* `out` row pitch (pixels) */
+    int   outHalf;     /* `out` is 16-bit half */
 } BtGpuParams;
 
 BT_FN float bt_clamp01(float v)
@@ -109,10 +200,10 @@ BT_FN void bt_accumulate_px(BT_GLOBAL const float* src, BT_GLOBAL float* dst,
         return; /* transparent pixels add nothing in every mode */
     }
     /* BGRA straight -> premultiplied RGB */
-    float a = bt_clamp01(src[so + 3]);
-    float r = src[so + 2] * a;
-    float g = src[so + 1] * a;
-    float b = src[so + 0] * a;
+    float a = bt_clamp01(bt_ld(src, so + 3, p.srcHalf));
+    float r = bt_ld(src, so + 2, p.srcHalf) * a;
+    float g = bt_ld(src, so + 1, p.srcHalf) * a;
+    float b = bt_ld(src, so + 0, p.srcHalf) * a;
     if (p.tint == BT_TINT_LUMA) {
         float l = 0.2126f * r + 0.7152f * g + 0.0722f * b;
         r = l;
@@ -145,7 +236,7 @@ BT_FN void bt_accumulate_px(BT_GLOBAL const float* src, BT_GLOBAL float* dst,
 
 /* `cur` = unmodified current frame (BGRA straight), used for Mix. */
 BT_FN void bt_finalize_px(BT_GLOBAL const float* cur, BT_GLOBAL float* dst,
-                          BtGpuParams p, int x, int y)
+                          BT_GLOBAL float* out, BtGpuParams p, int x, int y)
 {
     BT_GLOBAL float* d = dst + (y * p.dstPitch + x) * 4;
     float r = d[0];
@@ -156,10 +247,10 @@ BT_FN void bt_finalize_px(BT_GLOBAL const float* cur, BT_GLOBAL float* dst,
     float o0 = 0.0f, o1 = 0.0f, o2 = 0.0f, o3 = 0.0f;
     int so = bt_src_offset(p, x, y);
     if (so >= 0) {
-        o3 = bt_clamp01(cur[so + 3]);
-        o0 = cur[so + 2] * o3;
-        o1 = cur[so + 1] * o3;
-        o2 = cur[so + 0] * o3;
+        o3 = bt_clamp01(bt_ld(cur, so + 3, p.srcHalf));
+        o0 = bt_ld(cur, so + 2, p.srcHalf) * o3;
+        o1 = bt_ld(cur, so + 1, p.srcHalf) * o3;
+        o2 = bt_ld(cur, so + 0, p.srcHalf) * o3;
     }
     if (p.blend == BT_BLEND_SCREEN) {
         r = 1.0f - r;
@@ -181,45 +272,54 @@ BT_FN void bt_finalize_px(BT_GLOBAL const float* cur, BT_GLOBAL float* dst,
     }
     a = bt_clamp01(a);
     float inv = a > 1e-6f ? 1.0f / a : 0.0f;
-    /* premultiplied RGBA -> BGRA straight, in place */
-    d[0] = b * inv;
-    d[1] = g * inv;
-    d[2] = r * inv;
-    d[3] = a;
+    /* premultiplied RGBA -> BGRA straight: in place, or into `out` */
+    if (p.hasOut) {
+        int oo = (y * p.outPitch + x) * 4;
+        bt_st(out, oo + 0, p.outHalf, b * inv);
+        bt_st(out, oo + 1, p.outHalf, g * inv);
+        bt_st(out, oo + 2, p.outHalf, r * inv);
+        bt_st(out, oo + 3, p.outHalf, a);
+    } else {
+        d[0] = b * inv;
+        d[1] = g * inv;
+        d[2] = r * inv;
+        d[3] = a;
+    }
 }
 
 /* ------------------------------------------------------------------------ */
-/* Entry points. Every kernel has the same signature: (src, dst, params).   */
+/* Entry points. Every kernel has the same signature: (src, dst, out, p).   */
 /* ------------------------------------------------------------------------ */
 
 #if defined(BT_LANG_OPENCL)
 
-__kernel void bt_init(__global const float* src, __global float* dst, BtGpuParams p)
+__kernel void bt_init(__global const float* src, __global float* dst, __global float* out, BtGpuParams p)
 {
     int x = (int)get_global_id(0);
     int y = (int)get_global_id(1);
     if (x < p.width && y < p.height) bt_init_px(dst, p, x, y);
 }
 
-__kernel void bt_accumulate(__global const float* src, __global float* dst, BtGpuParams p)
+__kernel void bt_accumulate(__global const float* src, __global float* dst, __global float* out, BtGpuParams p)
 {
     int x = (int)get_global_id(0);
     int y = (int)get_global_id(1);
     if (x < p.width && y < p.height) bt_accumulate_px(src, dst, p, x, y);
 }
 
-__kernel void bt_finalize(__global const float* src, __global float* dst, BtGpuParams p)
+__kernel void bt_finalize(__global const float* src, __global float* dst, __global float* out, BtGpuParams p)
 {
     int x = (int)get_global_id(0);
     int y = (int)get_global_id(1);
-    if (x < p.width && y < p.height) bt_finalize_px(src, dst, p, x, y);
+    if (x < p.width && y < p.height) bt_finalize_px(src, dst, out, p, x, y);
 }
 
 #elif defined(BT_LANG_METAL)
 
 kernel void bt_init(device const float* src [[buffer(0)]],
                     device float* dst [[buffer(1)]],
-                    constant BtGpuParams& p [[buffer(2)]],
+                    device float* out [[buffer(2)]],
+                    constant BtGpuParams& p [[buffer(3)]],
                     uint2 gid [[thread_position_in_grid]])
 {
     int x = (int)gid.x;
@@ -229,7 +329,8 @@ kernel void bt_init(device const float* src [[buffer(0)]],
 
 kernel void bt_accumulate(device const float* src [[buffer(0)]],
                           device float* dst [[buffer(1)]],
-                          constant BtGpuParams& p [[buffer(2)]],
+                          device float* out [[buffer(2)]],
+                          constant BtGpuParams& p [[buffer(3)]],
                           uint2 gid [[thread_position_in_grid]])
 {
     int x = (int)gid.x;
@@ -239,35 +340,36 @@ kernel void bt_accumulate(device const float* src [[buffer(0)]],
 
 kernel void bt_finalize(device const float* src [[buffer(0)]],
                         device float* dst [[buffer(1)]],
-                        constant BtGpuParams& p [[buffer(2)]],
+                        device float* out [[buffer(2)]],
+                        constant BtGpuParams& p [[buffer(3)]],
                         uint2 gid [[thread_position_in_grid]])
 {
     int x = (int)gid.x;
     int y = (int)gid.y;
-    if (x < p.width && y < p.height) bt_finalize_px(src, dst, p, x, y);
+    if (x < p.width && y < p.height) bt_finalize_px(src, dst, out, p, x, y);
 }
 
 #elif defined(BT_LANG_CUDA)
 
-__global__ void bt_init(const float* src, float* dst, BtGpuParams p)
+__global__ void bt_init(const float* src, float* dst, float* out, BtGpuParams p)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x < p.width && y < p.height) bt_init_px(dst, p, x, y);
 }
 
-__global__ void bt_accumulate(const float* src, float* dst, BtGpuParams p)
+__global__ void bt_accumulate(const float* src, float* dst, float* out, BtGpuParams p)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x < p.width && y < p.height) bt_accumulate_px(src, dst, p, x, y);
 }
 
-__global__ void bt_finalize(const float* src, float* dst, BtGpuParams p)
+__global__ void bt_finalize(const float* src, float* dst, float* out, BtGpuParams p)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x < p.width && y < p.height) bt_finalize_px(src, dst, p, x, y);
+    if (x < p.width && y < p.height) bt_finalize_px(src, dst, out, p, x, y);
 }
 
 #endif

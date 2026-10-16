@@ -5,7 +5,8 @@
     powershell -ExecutionPolicy Bypass -File tools\check_sdk.ps1 -SdkRoot "C:\Users\Velich\AfterEffectsSDK_26.5_win"
 #>
 param(
-    [string]$SdkRoot = "C:\Users\Velich\AfterEffectsSDK_26.5_win"
+    [string]$SdkRoot = "C:\Users\Velich\AfterEffectsSDK_26.5_win",
+    [string]$PrSdkRoot = ""   # optional Premiere Pro SDK (GPU rendering in Premiere)
 )
 
 $ok = $true
@@ -80,6 +81,28 @@ else      { Write-Host "  [INFO]    PF_REGISTER_EFFECT_EXT2 not in this SDK - no
 $ver = Select-String -Path (Join-Path $examples "Headers\AE_Effect.h") -Pattern "#define\s+PF_PLUG_IN_(VERSION|SUBVERS)\s+(\d+)" |
        ForEach-Object { $_.Matches[0].Groups[2].Value }
 if ($ver) { Write-Host "  API version: $($ver -join '.')" }
+
+Write-Host "`n== Premiere Pro SDK (optional, GPU in Premiere) ==" -ForegroundColor Cyan
+if ($PrSdkRoot -eq "") {
+    $found = Get-ChildItem -Path $env:USERPROFILE -Directory -ErrorAction SilentlyContinue |
+             Where-Object { $_.Name -match "Premiere" -and $_.Name -match "SDK" } | Select-Object -First 1
+    if ($found) { $PrSdkRoot = $found.FullName }
+}
+if (-not $PrSdkRoot -or -not (Test-Path $PrSdkRoot)) {
+    Warn "not found - Premiere will render on the CPU. Download the Premiere Pro SDK (developer.adobe.com) and pass -PrSdkRoot"
+} else {
+    $prHeaders = Get-ChildItem -Path $PrSdkRoot -Recurse -Filter "PrSDKGPUFilter.h" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $prHeaders) {
+        Warn "PrSDKGPUFilter.h not found under $PrSdkRoot"
+    } else {
+        $dir = $prHeaders.DirectoryName
+        Good "Premiere headers: $dir"
+        foreach ($h in @("PrSDKGPUDeviceSuite.h", "PrSDKPPixSuite.h", "PrSDKVideoSegmentSuite.h",
+                         "PrSDKVideoSegmentProperties.h", "PrSDKMemoryManagerSuite.h")) {
+            if (Test-Path (Join-Path $dir $h)) { Good $h } else { Warn "$h missing - Premiere GPU path will not build" }
+        }
+    }
+}
 
 Write-Host "`n== Build tools ==" -ForegroundColor Cyan
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"

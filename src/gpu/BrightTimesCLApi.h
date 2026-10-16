@@ -40,6 +40,7 @@ struct Api {
     cl_int     (BTCL_CALL* EnqueueNDRangeKernel)(cl_command_queue, cl_kernel, cl_uint, const size_t*,
                                                  const size_t*, const size_t*, cl_uint, const cl_event*,
                                                  cl_event*);
+    cl_int     (BTCL_CALL* Finish)(cl_command_queue);
 };
 
 // Loads the OpenCL runtime once; nullptr if it is not installed.

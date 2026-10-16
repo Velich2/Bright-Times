@@ -65,7 +65,7 @@ void MetalTeardown(void* p)
     delete data;
 }
 
-bool MetalDispatch(const Device& dev, int kernel, void* src, void* dst, const BtGpuParams& p)
+bool MetalDispatch(const Device& dev, int kernel, void* src, void* dst, void* out, const BtGpuParams& p)
 {
     const MetalData* data = static_cast<const MetalData*>(dev.data);
     if (!data || kernel < 0 || kernel >= BT_KERNEL_COUNT || !dst) return false;
@@ -75,13 +75,15 @@ bool MetalDispatch(const Device& dev, int kernel, void* src, void* dst, const Bt
         id<MTLComputePipelineState> pipeline = data->pipelines[kernel];
         id<MTLBuffer>               dstBuf   = (id<MTLBuffer>)dst;
         id<MTLBuffer>               srcBuf   = src ? (id<MTLBuffer>)src : dstBuf;
+        id<MTLBuffer>               outBuf   = out ? (id<MTLBuffer>)out : dstBuf;
 
         id<MTLCommandBuffer>         cmd = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
         [enc setComputePipelineState:pipeline];
         [enc setBuffer:srcBuf offset:0 atIndex:0];
         [enc setBuffer:dstBuf offset:0 atIndex:1];
-        [enc setBytes:&p length:sizeof(BtGpuParams) atIndex:2];
+        [enc setBuffer:outBuf offset:0 atIndex:2];
+        [enc setBytes:&p length:sizeof(BtGpuParams) atIndex:3];
 
         const NSUInteger tw = pipeline.threadExecutionWidth;
         const NSUInteger th = std::max<NSUInteger>(1, pipeline.maxTotalThreadsPerThreadgroup / tw);
@@ -91,6 +93,19 @@ bool MetalDispatch(const Device& dev, int kernel, void* src, void* dst, const Bt
         [enc endEncoding];
         [cmd commit];
         return true;
+    }
+}
+
+bool MetalFinish(const Device& dev)
+{
+    @autoreleasepool {
+        // Command buffers on one queue complete in order: waiting for an empty
+        // one waits for everything enqueued before it.
+        id<MTLCommandQueue>  queue = (id<MTLCommandQueue>)dev.queue;
+        id<MTLCommandBuffer> cmd   = [queue commandBuffer];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+        return cmd.status == MTLCommandBufferStatusCompleted;
     }
 }
 

@@ -17,6 +17,16 @@ if(OpenCL_FOUND)
   # OpenCL::OpenCL is for the mock host itself; the plug-in code loads it at runtime.
   target_link_libraries(bt_opencl_host_test PRIVATE OpenCL::OpenCL ${CMAKE_DL_LIBS})
   add_test(NAME opencl_host COMMAND bt_opencl_host_test)
+
+  # Premiere Pro GPU filter through a mock Premiere host (frames in OpenCL buffers).
+  add_executable(bt_premiere_gpu_test premiere_gpu_test.cpp
+    ../src/BrightTimes.cpp ../src/premiere/BrightTimesPremiereGPU.cpp
+    ../src/gpu/BrightTimesGPU.cpp ../src/gpu/BrightTimesOpenCL.cpp)
+  add_dependencies(bt_premiere_gpu_test bt_kernel_source)
+  target_include_directories(bt_premiere_gpu_test PRIVATE sdk_stub prsdk_stub ../src ../src/gpu "${BT_GEN_DIR}")
+  target_compile_definitions(bt_premiere_gpu_test PRIVATE BT_ENABLE_OPENCL BT_PREMIERE_GPU CL_TARGET_OPENCL_VERSION=120)
+  target_link_libraries(bt_premiere_gpu_test PRIVATE OpenCL::OpenCL ${CMAKE_DL_LIBS})
+  add_test(NAME premiere_gpu COMMAND bt_premiere_gpu_test)
 else()
   message(STATUS "OpenCL not found: GPU test skipped")
 endif()

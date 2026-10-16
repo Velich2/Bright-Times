@@ -30,19 +30,25 @@ bool Setup(const Device& dev, void** outData);
 void Teardown(int fw, void* data);
 
 // Enqueues one kernel (BT_KERNEL_*) over params.width x params.height.
-// `src` may be null; buffers are cl_mem / id<MTLBuffer> / CUDA device pointers.
-bool Dispatch(const Device& dev, int kernel, void* src, void* dst, const BtGpuParams& params);
+// `src` and `out` may be null; buffers are cl_mem / id<MTLBuffer> / CUDA device pointers.
+bool Dispatch(const Device& dev, int kernel, void* src, void* dst, void* out, const BtGpuParams& params);
+
+// Waits until all work enqueued by Dispatch has finished (before freeing buffers).
+bool Finish(const Device& dev);
 
 // Backend entry points (defined only when the backend is enabled).
 bool OpenCLSetup(const Device& dev, void** outData);
 void OpenCLTeardown(void* data);
-bool OpenCLDispatch(const Device& dev, int kernel, void* src, void* dst, const BtGpuParams& p);
+bool OpenCLDispatch(const Device& dev, int kernel, void* src, void* dst, void* out, const BtGpuParams& p);
+bool OpenCLFinish(const Device& dev);
 
 bool MetalSetup(const Device& dev, void** outData);
 void MetalTeardown(void* data);
-bool MetalDispatch(const Device& dev, int kernel, void* src, void* dst, const BtGpuParams& p);
+bool MetalDispatch(const Device& dev, int kernel, void* src, void* dst, void* out, const BtGpuParams& p);
+bool MetalFinish(const Device& dev);
 
-bool CUDADispatch(int kernel, const float* src, float* dst, const BtGpuParams& p);
+bool CUDADispatch(int kernel, const float* src, float* dst, float* out, const BtGpuParams& p);
+bool CUDAFinish();
 
 // Kernel source string (generated from BrightTimesKernels.h at build time).
 extern const char* const kKernelSource;
