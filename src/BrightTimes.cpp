@@ -21,10 +21,13 @@ namespace {
 
 // Checkout ids 0..N-1 are the samples; this one is the unmodified current frame.
 constexpr A_long kCurrentFrameCheckoutId = 10000;
+// Re-checkouts of samples that fell outside the clip (Hold First/Last Frame).
+constexpr A_long kHeldFrameCheckoutBase = 20000;
 
 struct RenderData {
     bt::Settings             settings;
     std::vector<bt::Sample>  samples;
+    std::vector<A_long>      checkoutIds;  // per sample: id used in PreRender checkout
     bool                     useGpu = true;
 };
 
@@ -162,6 +165,11 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data)
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Frame Step", 1, 100, 1, 10, 1, ID_FRAME_STEP);
+
+    // What to use for samples before the first / after the last frame of the clip.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Clip Edges", 2, BT_EDGE_HOLD,
+                  "Hold First/Last Frame|Transparent", 0, ID_EDGE_MODE);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_CHECKBOXX("Include Current Frame", TRUE, PF_ParamFlag_SUPERVISE, ID_INCLUDE_CURRENT);
@@ -461,12 +469,12 @@ PF_Err RenderWorld(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderD
 
     for (size_t i = 0; i < rd.samples.size() && !err; ++i) {
         PF_EffectWorld* src = nullptr;
-        ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, static_cast<A_long>(i), &src));
+        ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, rd.checkoutIds[i], &src));
         if (!err && src && src->data) {
             AccumulateCtx ctx{out, src, &rd.samples[i], s.blendMode, s.tintMode, acc.data()};
             ERR(iter->iterate_generic(out->height, &ctx, AccumulateRowFn<P>));
         }
-        ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, static_cast<A_long>(i)));
+        ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, rd.checkoutIds[i]));
         ERR(PF_ABORT(in_data));
     }
 
@@ -586,7 +594,7 @@ PF_Err RenderGPU(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderDat
     for (size_t i = 0; i < rd.samples.size() && !err; ++i) {
         PF_EffectWorld* src    = nullptr;
         void*           srcMem = nullptr;
-        ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, static_cast<A_long>(i), &src));
+        ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, rd.checkoutIds[i], &src));
         if (!err && src) ERR(gpu->GetGPUWorldData(in_data->effect_ref, src, &srcMem));
         if (!err && srcMem) {
             const bt::Sample& k = rd.samples[i];
@@ -595,7 +603,7 @@ PF_Err RenderGPU(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderDat
             p.kr = k.kr; p.kg = k.kg; p.kb = k.kb; p.ka = k.ka;
             dispatch(BT_KERNEL_ACCUMULATE, srcMem, p);
         }
-        ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, static_cast<A_long>(i)));
+        ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, rd.checkoutIds[i]));
         ERR(PF_ABORT(in_data));
     }
 
@@ -654,9 +662,11 @@ PF_Err PreRender(PF_InData* in_data, PF_PreRenderExtra* extra)
     std::unique_ptr<RenderData> rd(new RenderData);
     ERR(ReadSettings(in_data, rd->settings));
     if (err) return err;
+    bool holdEdges = true;
     {
         ParamReader r(in_data);
         rd->useGpu = r.Bool(BT_USE_GPU);
+        holdEdges  = r.Popup(BT_EDGE_MODE) == BT_EDGE_HOLD;
         ERR(r.err());
         if (err) return err;
     }
@@ -665,24 +675,58 @@ PF_Err PreRender(PF_InData* in_data, PF_PreRenderExtra* extra)
     const PF_RenderRequest req = extra->input->output_request;
     PF_LRect result = {0, 0, 0, 0}, maxResult = {0, 0, 0, 0};
 
-    auto checkout = [&](A_long id, A_long frameOffset) {
-        if (err) return;
+    // Returns true if the layer has content at time t.
+    auto checkout = [&](A_long id, A_long t) -> bool {
+        if (err) return false;
         PF_CheckoutResult cr;
         AEFX_CLR_STRUCT(cr);
-        const A_long t = in_data->current_time + frameOffset * in_data->time_step;
         err = extra->cb->checkout_layer(in_data->effect_ref, BT_INPUT, id, &req, t,
                                         in_data->time_step, in_data->time_scale, &cr);
-        if (!err) {
-            UnionRect(cr.result_rect, result);
-            UnionRect(cr.max_result_rect, maxResult);
-        }
+        if (err) return false;
+        UnionRect(cr.result_rect, result);
+        UnionRect(cr.max_result_rect, maxResult);
+        return cr.result_rect.right > cr.result_rect.left && cr.result_rect.bottom > cr.result_rect.top;
     };
 
-    for (size_t i = 0; i < rd->samples.size(); ++i) {
-        checkout(static_cast<A_long>(i), rd->samples[i].frameOffset);
-    }
     // Unmodified current frame: used for Mix and as fallback extent.
-    checkout(kCurrentFrameCheckoutId, 0);
+    checkout(kCurrentFrameCheckoutId, in_data->current_time);
+
+    // Hold First/Last Frame: samples outside the clip use its first / last frame
+    // instead of transparent pixels (which darken the result near the edges).
+    //  1. clamp sample times to the layer duration [0, total_time - one frame];
+    //  2. if a sample still has no content (e.g. trimmed footage), re-check it
+    //     out at the nearest sample time that has content, walking outwards
+    //     from the current frame.
+    const A_long step  = in_data->time_step;
+    const bool   clamp = holdEdges && step > 0 && in_data->total_time > 0;
+    const A_long tLast = in_data->total_time - step;
+    auto sampleTime = [&](const bt::Sample& smp) {
+        A_long t = in_data->current_time + smp.frameOffset * step;
+        if (clamp) t = std::max<A_long>(0, std::min(t, tLast));
+        return t;
+    };
+
+    const size_t n = rd->samples.size();
+    rd->checkoutIds.assign(n, 0);
+    // Past samples nearest-first, then future samples nearest-first.
+    std::vector<size_t> order;
+    for (size_t i = n; i-- > 0;) if (rd->samples[i].frameOffset < 0) order.push_back(i);
+    const size_t firstFuture = order.size();
+    for (size_t i = 0; i < n; ++i) if (rd->samples[i].frameOffset >= 0) order.push_back(i);
+
+    A_long lastGood = in_data->current_time;
+    for (size_t k = 0; k < order.size() && !err; ++k) {
+        if (k == firstFuture) lastGood = in_data->current_time;  // restart for the future side
+        const size_t i = order[k];
+        const A_long t = sampleTime(rd->samples[i]);
+        rd->checkoutIds[i] = static_cast<A_long>(i);
+        if (checkout(static_cast<A_long>(i), t)) {
+            lastGood = t;
+        } else if (!err && holdEdges && t != lastGood) {
+            rd->checkoutIds[i] = kHeldFrameCheckoutBase + static_cast<A_long>(i);
+            checkout(rd->checkoutIds[i], lastGood);
+        }
+    }
     if (err) return err;
 
     if (rd->useGpu && extra->input->what_gpu != PF_GPU_Framework_NONE &&

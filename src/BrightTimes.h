@@ -41,6 +41,7 @@ enum {
     BT_FRAMES_BACKWARD,
     BT_FRAMES_FORWARD,
     BT_FRAME_STEP,
+    BT_EDGE_MODE,
     BT_INCLUDE_CURRENT,
     BT_CURRENT_UNTINTED,
 
@@ -110,8 +111,12 @@ enum {
     ID_BLEND_MODE,
     ID_INTENSITY,
     ID_MIX,
-    ID_USE_GPU
+    ID_USE_GPU,
+    ID_EDGE_MODE
 };
+
+// "Clip Edges" popup values.
+enum { BT_EDGE_HOLD = 1, BT_EDGE_TRANSPARENT };
 
 extern "C" {
 DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutData* out_data,

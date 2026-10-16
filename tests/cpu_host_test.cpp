@@ -31,8 +31,13 @@ static void get(const PF_EffectWorld& w, int x, int y, float* o) {
   else { auto* q=(const PF_PixelFloat*)p; o[0]=q->alpha; o[1]=q->red; o[2]=q->green; o[3]=q->blue; }
 }
 static Frame* makeWorld() { auto* f = new Frame; f->w = {}; f->w.width=W; f->w.height=H; f->w.rowbytes=W*pixSize()+16; f->buf.assign(f->w.rowbytes*H, 0); f->w.data=f->buf.data(); return f; }
+// The layer only has content in [g_clipStart, g_clipEnd): like AE, times outside
+// return an empty result rect and transparent pixels.
+static A_long g_clipStart = -1000000, g_clipEnd = 1000000;
+static bool inClip(A_long t) { return t >= g_clipStart && t < g_clipEnd; }
 static Frame* renderFrame(A_long t) {  // t in frames (time_step = 1)
   Frame* f = makeWorld();
+  if (!inClip(t)) return f;
   for (int y=0;y<H;++y) for (int x=0;x<W;++x) {
     float v = 0.5f + 0.3f*y/H; if ((x/16+y/16)%2) v -= 0.05f;
     float r=v, g=v*0.9f, b=v*0.75f, a=1.f;
@@ -47,7 +52,10 @@ static PF_Err checkin_param(PF_ProgPtr, PF_ParamDef*) { return 0; }
 static PF_Err abort_cb(PF_ProgPtr) { return 0; }
 static PF_Err checkout_layer(PF_ProgPtr, PF_ParamIndex idx, A_long id, const PF_RenderRequest*, A_long t, A_long, A_u_long, PF_CheckoutResult* r) {
   if (idx != 0) return PF_Err_BAD_CALLBACK_PARAM;
-  g_checkTime[id] = t; r->result_rect = {0,0,W,H}; r->max_result_rect = {0,0,W,H}; return 0; }
+  g_checkTime[id] = t;
+  if (inClip(t)) { r->result_rect = {0,0,W,H}; r->max_result_rect = {0,0,W,H}; }
+  else { r->result_rect = {0,0,0,0}; r->max_result_rect = {0,0,W,H}; }
+  return 0; }
 static std::map<A_long, Frame*> g_pix;
 // AE rule (error 25::244): the output may only be checked out after at least
 // one input has been checked out in this render.
@@ -145,6 +153,48 @@ int main(int argc, char** argv) {
     std::printf("asymmetric 2 back / 6 forward: OK\n");
     g_params[BT_FRAMES_BACKWARD-1].u.fs_d.value = 4;
     g_params[BT_FRAMES_FORWARD-1].u.fs_d.value  = 4;
+  }
+  // Clip edges: current frame 1 of a clip [0, 20), 4 frames back / 4 forward.
+  // Hold must keep the result opaque and identical on static areas; Transparent
+  // (old behaviour) darkens/fades it.
+  {
+    g_fmt = PF_PixelFormat_ARGB128;
+    g_params[BT_BLEND_MODE-1].u.pd.value = 1;
+    g_params[BT_INTENSITY-1].u.fs_d.value = 100;
+    auto renderBg = [&](int edgeMode, A_long totalTime, A_long curTime, float* px) -> bool {
+      g_params[BT_EDGE_MODE-1].u.pd.value = edgeMode;
+      in.total_time = totalTime; in.current_time = curTime;
+      g_checkTime.clear();
+      PF_PreRenderInput pin{}; PF_PreRenderOutput pout{}; PF_PreRenderCallbacks pcb{checkout_layer};
+      PF_PreRenderExtra pex{&pin, &pout, &pcb};
+      if (EffectMain(PF_Cmd_SMART_PRE_RENDER, &in, &out, nullptr, nullptr, &pex)) return false;
+      g_output = makeWorld();
+      PF_SmartRenderInput sin{}; sin.pre_render_data = pout.pre_render_data;
+      PF_SmartRenderCallbacks scb{checkout_layer_pixels, checkin_layer_pixels, checkout_output};
+      PF_SmartRenderExtra sex{&sin, &scb};
+      g_inputCheckouts = 0;
+      const PF_Err e = EffectMain(PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex);
+      pout.delete_pre_render_data_func(pout.pre_render_data);
+      get(g_output->w, 300, 10, px);
+      delete g_output;
+      return e == 0 && g_pix.empty();
+    };
+    g_clipStart = 0; g_clipEnd = 20;
+    float src[4]; { Frame* f0 = renderFrame(1); get(f0->w, 300, 10, src); delete f0; }
+    float hold[4], holdNoLen[4], holdEnd[4], transp[4];
+    bool ok = renderBg(BT_EDGE_HOLD, 20, 1, hold)          // clamp by layer duration
+           && renderBg(BT_EDGE_HOLD, 0, 1, holdNoLen)      // duration unknown: empty-frame fallback
+           && renderBg(BT_EDGE_HOLD, 20, 18, holdEnd)      // near the end of the clip
+           && renderBg(BT_EDGE_TRANSPARENT, 20, 1, transp);
+    auto same = [&](const float* a) { for (int c = 0; c < 4; ++c) if (std::fabs(a[c] - src[c]) > 1e-4f) return false; return true; };
+    std::printf("clip edges: hold a=%.3f, hold(no duration) a=%.3f, hold@end a=%.3f, transparent a=%.3f\n",
+                hold[0], holdNoLen[0], holdEnd[0], transp[0]);
+    if (!ok || !same(hold) || !same(holdNoLen) || !same(holdEnd) || transp[0] > 0.99f) {
+      std::printf("FAIL: clip edge handling\n"); return 1;
+    }
+    std::printf("clip edges: OK\n");
+    g_clipStart = -1000000; g_clipEnd = 1000000; in.total_time = 0; in.current_time = 5;
+    g_params[BT_EDGE_MODE-1].u.pd.value = BT_EDGE_HOLD;
   }
   std::printf("checkout times:"); for (auto& kv : g_checkTime) std::printf(" %d@%d", kv.first, kv.second); std::printf("\n");
   std::printf("ALL OK\n");
