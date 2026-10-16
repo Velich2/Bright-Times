@@ -103,7 +103,7 @@ static PF_Err addFmt(PF_ProgPtr, PrPixelFormat f) { g_registeredFormats.push_bac
 static PF_Err clearFmt(PF_ProgPtr) { g_registeredFormats.clear(); return 0; }
 static PF_Err getPrFmt(PF_EffectWorld* w, PrPixelFormat* f) {
   const A_long k = fmtOf(*w);
-  if (k == PF_PixelFormat_ARGB32 || k == PrPixelFormat_BGRA_4444_8u || k == PrPixelFormat_BGRA_4444_32f) { *f = k; return 0; }
+  if (k == PF_PixelFormat_ARGB32 || k == PrPixelFormat_BGRA_4444_8u || k == PrPixelFormat_BGRA_4444_32f) { *f = static_cast<PrPixelFormat>(k); return 0; }
   return PF_Err_BAD_CALLBACK_PARAM; }
 static PF_PixelFormatSuite1 g_pfs{addFmt, clearFmt, nullptr, nullptr, getPrFmt};
 static PF_Err matchFmt(PF_ProgPtr) { ++g_matchFormatCalls; return 0; }

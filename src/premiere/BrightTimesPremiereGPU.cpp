@@ -342,7 +342,7 @@ struct GpuFrame {
     int           height = 0;
     int           pitch  = 0;  // pixels
     bool          half   = false;
-    PrPixelFormat format = 0;
+    PrPixelFormat format = PrPixelFormat_Invalid;
 };
 
 bool Describe(const PrSuites& su, PPixHand frame, GpuFrame& f)

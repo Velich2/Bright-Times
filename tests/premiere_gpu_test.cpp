@@ -24,7 +24,7 @@ extern "C" prSuiteError xGPUFilterEntry(csSDK_uint32, csSDK_int32*, prBool, piSu
 namespace {
 
 constexpr int           W = 96, H = 64;
-constexpr PrPixelFormat kGpu32f = 0x41444340, kGpu16f = 0x61444340;
+constexpr PrPixelFormat kGpu32f = static_cast<PrPixelFormat>(0x41444340), kGpu16f = static_cast<PrPixelFormat>(0x61444340);
 constexpr PrTime        kTpf = 10000, kClipStartSeq = 1000000;
 
 cl_context       g_ctx;

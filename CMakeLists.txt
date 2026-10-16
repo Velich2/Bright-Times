@@ -131,7 +131,7 @@ else()
 endif()
 
 if(WIN32)
-  target_compile_definitions(BrightTimes PRIVATE MSWindows WIN32 _WINDOWS NOMINMAX)
+  target_compile_definitions(BrightTimes PRIVATE MSWindows WIN32 _WINDOWS "NOMINMAX=")  # empty, as PrSDKTypes.h defines it
   set_target_properties(BrightTimes PROPERTIES SUFFIX ".aex" PREFIX "")
 
   set(BT_PIPL_RC "${BT_GEN_DIR}/BrightTimesPiPL.rc")

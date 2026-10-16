@@ -94,8 +94,8 @@ typedef PF_Err (*PF_PluginDataCB2)(PF_PluginDataPtr, const A_u_char*, const A_u_
 typedef PF_LayerDef PF_LayerDef;
 
 // ---- Premiere Pro support (PrSDKAESupport.h / PrSDKPixelFormat.h)
-typedef int PrPixelFormat;
-enum { PrPixelFormat_BGRA_4444_8u = 1634887522, PrPixelFormat_ARGB_4444_8u = 1650946657,
+// An enum (not int) as in the real SDK, so implicit int conversions fail here too.
+enum PrPixelFormat : int { PrPixelFormat_BGRA_4444_8u = 1634887522, PrPixelFormat_ARGB_4444_8u = 1650946657,
        PrPixelFormat_BGRA_4444_32f = 1634879298, PrPixelFormat_Invalid = 1717854562 };
 #define kPFPixelFormatSuite "PF Pixel Format Suite"
 #define kPFPixelFormatSuiteVersion1 1
