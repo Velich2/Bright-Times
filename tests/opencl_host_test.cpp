@@ -102,7 +102,7 @@ int main() {
   EffectMain(PF_Cmd_GPU_DEVICE_SETUP, &in, &out, nullptr, nullptr, &gx2); printf("cuda refused: %d\n", !(out.out_flags2 & PF_OutFlag2_SUPPORTS_GPU_RENDER_F32) && !go2.gpu_data);
   struct Case { int blend, tint; float mix, intensity; int colorMode, groupMode; float soft; int shift; bool untinted; };
   Case cases[] = { {1,1,100,100,1,1,0,0,false}, {1,2,100,100,2,1,0,0,false}, {2,1,70,100,1,1,50,0,false}, {3,1,100,35,3,2,0,0,true},
-                   {4,2,40,150,1,1,100,0,false}, {1,1,60,100,1,1,30,7,false}, {3,2,100,50,2,2,0,5,true} };
+                   {4,2,40,150,1,1,100,0,false}, {5,1,100,200,3,1,29,0,false}, {5,2,70,100,1,2,0,6,true}, {1,1,60,100,1,1,30,7,false}, {3,2,100,50,2,2,0,5,true} };
   int fails = 0;
   for (auto& c : cases) {
     g_params[BT_BLEND_MODE-1].u.pd.value = c.blend; g_params[BT_TINT_MODE-1].u.pd.value = c.tint; g_params[BT_MIX-1].u.fs_d.value = c.mix;

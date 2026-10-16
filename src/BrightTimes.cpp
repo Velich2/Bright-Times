@@ -141,6 +141,7 @@ PF_Err ReadSettings(PF_InData* in_data, bt::Settings& s)
 
     s.tintMode        = static_cast<bt::TintMode>(r.Popup(BT_TINT_MODE));
     s.blendMode       = static_cast<bt::BlendMode>(r.Popup(BT_BLEND_MODE));
+    s.colorBalance    = r.Float(BT_COLOR_BALANCE) / 100.f;
     s.intensity       = r.Float(BT_INTENSITY) / 100.f;
     s.mix             = r.Float(BT_MIX) / 100.f;
 
@@ -254,8 +255,13 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data)
                   "Color Filter|Luminance Tint", 0, ID_TINT_MODE);
 
     AEFX_CLR_STRUCT(def);
-    PF_ADD_POPUPX("Blend Mode", 4, bt::BlendMode_OPTICAL,
-                  "Optical (Balanced)|Additive|Screen|Lighten", 0, ID_BLEND_MODE);
+    PF_ADD_POPUPX("Blend Mode", 5, bt::BlendMode_OPTICAL,
+                  "Optical (Balanced)|Additive|Screen|Lighten|Tinted Trails", PF_ParamFlag_SUPERVISE, ID_BLEND_MODE);
+
+    // Optical only: how strictly static areas keep their original colour.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Color Balance", 0, 100, 0, 100, 100, 1,
+                         PF_ValueDisplayFlag_PERCENT, 0, ID_COLOR_BALANCE);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Intensity", 0, 1000, 0, 400, 100, 1,
@@ -296,6 +302,7 @@ PF_Err UpdateParamsUI(PF_InData* in_data, PF_ParamDef* params[])
 
     setEnabled(BT_CURRENT_UNTINTED, current);
     setEnabled(BT_GROUP_SOFTNESS, sequential);
+    setEnabled(BT_COLOR_BALANCE, params[BT_BLEND_MODE]->u.pd.value == bt::BlendMode_OPTICAL);
 
     const bool spectrum = colorMode == bt::ColorMode_SPECTRUM;
     setEnabled(BT_HUE_START, spectrum);
@@ -431,6 +438,7 @@ struct FinalizeCtx {
     const PF_EffectWorld* current;  // may be null
     bt::BlendMode         blend;
     float                 mix;
+    float                 gain;
     const float*          acc;
 };
 
@@ -447,7 +455,7 @@ PF_Err FinalizeRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*iterati
     for (A_long x = 0; x < c.out->width; ++x, acc += 4) {
         const bool hasOrig = cur && x >= s.x0 && x < s.x1;
         if (hasOrig) LoadPremul(cur[x + s.dx], orig);
-        bt::FinalizePixel(c.blend, c.mix, acc, hasOrig ? orig : nullptr, res);
+        bt::FinalizePixel(c.blend, c.mix, acc, hasOrig ? orig : nullptr, res, c.gain);
         StoreUnpremul(res, dst[x]);
     }
     return PF_Err_NONE;
@@ -479,7 +487,7 @@ PF_Err RenderWorld(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderD
     }
 
     if (!err) {
-        FinalizeCtx ctx{out, current, s.blendMode, s.mix, acc.data()};
+        FinalizeCtx ctx{out, current, s.blendMode, s.mix, s.intensity, acc.data()};
         ERR(iter->iterate_generic(out->height, &ctx, FinalizeRowFn<P>));
     }
     return err;
@@ -490,7 +498,8 @@ PF_Err RenderWorld(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderD
 // ---------------------------------------------------------------------------
 
 static_assert(BT_BLEND_OPTICAL == bt::BlendMode_OPTICAL && BT_BLEND_ADDITIVE == bt::BlendMode_ADDITIVE &&
-              BT_BLEND_SCREEN == bt::BlendMode_SCREEN && BT_BLEND_LIGHTEN == bt::BlendMode_LIGHTEN,
+              BT_BLEND_SCREEN == bt::BlendMode_SCREEN && BT_BLEND_LIGHTEN == bt::BlendMode_LIGHTEN &&
+              BT_BLEND_TRAILS == bt::BlendMode_TRAILS,
               "GPU blend constants out of sync");
 static_assert(BT_TINT_FILTER == bt::TintMode_FILTER && BT_TINT_LUMA == bt::TintMode_LUMA,
               "GPU tint constants out of sync");
@@ -581,6 +590,7 @@ PF_Err RenderGPU(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderDat
     base.blend    = s.blendMode;
     base.tint     = s.tintMode;
     base.mix      = s.mix;
+    base.gain     = s.intensity;
 
     auto dispatch = [&](int kernel, void* src, const BtGpuParams& p) {
         if (!err && !btgpu::Dispatch(dev, kernel, src, dstMem, p)) err = PF_Err_INTERNAL_STRUCT_DAMAGED;

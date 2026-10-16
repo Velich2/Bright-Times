@@ -71,6 +71,7 @@ enum {
 
     BT_TINT_MODE,
     BT_BLEND_MODE,
+    BT_COLOR_BALANCE,
     BT_INTENSITY,
     BT_MIX,
     BT_USE_GPU,
@@ -112,7 +113,8 @@ enum {
     ID_INTENSITY,
     ID_MIX,
     ID_USE_GPU,
-    ID_EDGE_MODE
+    ID_EDGE_MODE,
+    ID_COLOR_BALANCE
 };
 
 // "Clip Edges" popup values.

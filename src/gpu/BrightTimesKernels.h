@@ -43,6 +43,7 @@
 #define BT_BLEND_ADDITIVE 2
 #define BT_BLEND_SCREEN   3
 #define BT_BLEND_LIGHTEN  4
+#define BT_BLEND_TRAILS   5
 #define BT_TINT_FILTER    1
 #define BT_TINT_LUMA      2
 
@@ -68,6 +69,7 @@ typedef struct BtGpuParams {
     float kr, kg, kb, ka;
     float mix;
     float initValue;
+    float gain;        /* Intensity, used by Tinted Trails in bt_finalize */
 } BtGpuParams;
 
 BT_FN float bt_clamp01(float v)
@@ -128,7 +130,7 @@ BT_FN void bt_accumulate_px(BT_GLOBAL const float* src, BT_GLOBAL float* dst,
         d[1] *= 1.0f - bt_clamp01(cg);
         d[2] *= 1.0f - bt_clamp01(cb);
         d[3] *= 1.0f - bt_clamp01(ca);
-    } else if (p.blend == BT_BLEND_LIGHTEN) {
+    } else if (p.blend == BT_BLEND_LIGHTEN || p.blend == BT_BLEND_TRAILS) {
         d[0] = bt_maxf(d[0], cr);
         d[1] = bt_maxf(d[1], cg);
         d[2] = bt_maxf(d[2], cb);
@@ -150,22 +152,28 @@ BT_FN void bt_finalize_px(BT_GLOBAL const float* cur, BT_GLOBAL float* dst,
     float g = d[1];
     float b = d[2];
     float a = d[3];
+    /* current frame, premultiplied RGBA (0 outside the source) */
+    float o0 = 0.0f, o1 = 0.0f, o2 = 0.0f, o3 = 0.0f;
+    int so = bt_src_offset(p, x, y);
+    if (so >= 0) {
+        o3 = bt_clamp01(cur[so + 3]);
+        o0 = cur[so + 2] * o3;
+        o1 = cur[so + 1] * o3;
+        o2 = cur[so + 0] * o3;
+    }
     if (p.blend == BT_BLEND_SCREEN) {
         r = 1.0f - r;
         g = 1.0f - g;
         b = 1.0f - b;
         a = 1.0f - a;
+    } else if (p.blend == BT_BLEND_TRAILS) {
+        r = o0 + p.gain * bt_maxf(0.0f, r - o0);
+        g = o1 + p.gain * bt_maxf(0.0f, g - o1);
+        b = o2 + p.gain * bt_maxf(0.0f, b - o2);
+        a = o3 + p.gain * bt_maxf(0.0f, a - o3);
     }
     float mix = bt_clamp01(p.mix);
     if (mix < 1.0f) {
-        float o0 = 0.0f, o1 = 0.0f, o2 = 0.0f, o3 = 0.0f;
-        int so = bt_src_offset(p, x, y);
-        if (so >= 0) {
-            o3 = bt_clamp01(cur[so + 3]);
-            o0 = cur[so + 2] * o3;
-            o1 = cur[so + 1] * o3;
-            o2 = cur[so + 0] * o3;
-        }
         r = o0 + (r - o0) * mix;
         g = o1 + (g - o1) * mix;
         b = o2 + (b - o2) * mix;

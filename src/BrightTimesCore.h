@@ -32,7 +32,8 @@ struct Color {
 enum ColorMode { ColorMode_SPECTRUM = 1, ColorMode_RGB, ColorMode_CUSTOM };
 enum GroupMode { GroupMode_SEQUENTIAL = 1, GroupMode_CYCLIC };
 enum TintMode  { TintMode_FILTER = 1, TintMode_LUMA };
-enum BlendMode { BlendMode_OPTICAL = 1, BlendMode_ADDITIVE, BlendMode_SCREEN, BlendMode_LIGHTEN };
+enum BlendMode { BlendMode_OPTICAL = 1, BlendMode_ADDITIVE, BlendMode_SCREEN, BlendMode_LIGHTEN,
+                 BlendMode_TRAILS };
 
 constexpr int kMaxFrames      = 50;  // per direction
 constexpr int kMaxGroups      = 16;
@@ -68,6 +69,7 @@ struct Settings {
     BlendMode blendMode = BlendMode_OPTICAL;
     float     intensity = 1.f;       // gain
     float     mix       = 1.f;       // 0 = original, 1 = full effect
+    float     colorBalance = 1.f;    // Optical only: 1 = per-channel balance, 0 = none
 };
 
 // One frame that has to be fetched and composited.
@@ -233,8 +235,16 @@ inline std::vector<Sample> BuildSamples(const Settings& sIn)
             case BlendMode_OPTICAL: {
                 // Per-channel normalisation: filters of all samples add up to white,
                 // so static areas reproduce the original colour exactly.
+                // Color Balance blends each channel's divisor towards the common one
+                // (the brightest channel, as in Additive). With a palette that lacks
+                // a channel (e.g. only blues) full balance must amplify the little
+                // red/green there is, producing strong complementary fringes; lower
+                // balance keeps the palette's own colours instead.
+                const double bal    = Clamp01(s.colorBalance);
+                const double maxSum = std::max({sumR, sumG, sumB});
                 auto norm = [&](double sumC, float tintC) -> float {
-                    if (sumC > eps) return static_cast<float>(gain * smp.weight * tintC / sumC);
+                    const double den = (1.0 - bal) * maxSum + bal * sumC;
+                    if (den > eps) return static_cast<float>(gain * smp.weight * tintC / den);
                     return static_cast<float>(gain * smp.weight / std::max(sumW, eps));
                 };
                 smp.kr = norm(sumR, smp.tint.r);
@@ -251,6 +261,16 @@ inline std::vector<Sample> BuildSamples(const Settings& sIn)
                 smp.kg = static_cast<float>(gain * smp.weight * smp.tint.g / den);
                 smp.kb = static_cast<float>(gain * smp.weight * smp.tint.b / den);
                 smp.ka = static_cast<float>(smp.weight / std::max(sumW, eps));
+                break;
+            }
+            case BlendMode_TRAILS: {
+                // Ghosts at exactly the palette colours (no gain here: Intensity is
+                // applied to the excess over the current frame in FinalizePixel).
+                const float w = static_cast<float>(smp.weight / std::max(maxW, eps));
+                smp.kr = w * smp.tint.r;
+                smp.kg = w * smp.tint.g;
+                smp.kb = w * smp.tint.b;
+                smp.ka = w;
                 break;
             }
             case BlendMode_SCREEN:
@@ -296,6 +316,7 @@ inline void AccumulatePixel(BlendMode mode, TintMode tint, const Sample& k,
             acc[3] *= 1.f - Clamp01(ca);
             break;
         case BlendMode_LIGHTEN:
+        case BlendMode_TRAILS:
             acc[0] = std::max(acc[0], cr);
             acc[1] = std::max(acc[1], cg);
             acc[2] = std::max(acc[2], cb);
@@ -312,15 +333,25 @@ inline void AccumulatePixel(BlendMode mode, TintMode tint, const Sample& k,
 
 // Converts an accumulated pixel into the final premultiplied pixel `dst`.
 // `orig` is the premultiplied current frame pixel (nullptr = transparent), used by Mix.
-inline void FinalizePixel(BlendMode mode, float mix, const float* acc, const float* orig, float* dst)
+// `gain` (Intensity) is only used by Tinted Trails.
+inline void FinalizePixel(BlendMode mode, float mix, const float* acc, const float* orig, float* dst,
+                          float gain = 1.f)
 {
+    static const float kZero[4] = {0.f, 0.f, 0.f, 0.f};
     float r = acc[0], g = acc[1], b = acc[2], a = acc[3];
     if (mode == BlendMode_SCREEN) {
         r = 1.f - r; g = 1.f - g; b = 1.f - b; a = 1.f - a;
+    } else if (mode == BlendMode_TRAILS) {
+        // Current frame untouched; tinted ghosts only where they are brighter
+        // than it (per channel), scaled by Intensity. Static areas never change.
+        const float* o = orig ? orig : kZero;
+        r = o[0] + gain * std::max(0.f, r - o[0]);
+        g = o[1] + gain * std::max(0.f, g - o[1]);
+        b = o[2] + gain * std::max(0.f, b - o[2]);
+        a = o[3] + gain * std::max(0.f, a - o[3]);
     }
     mix = Clamp01(mix);
     if (mix < 1.f) {
-        static const float kZero[4] = {0.f, 0.f, 0.f, 0.f};
         const float* o = orig ? orig : kZero;
         r = o[0] + (r - o[0]) * mix;
         g = o[1] + (g - o[1]) * mix;
@@ -341,10 +372,10 @@ inline void AccumulateRow(BlendMode mode, TintMode tint, const Sample& k,
 }
 
 inline void FinalizeRow(BlendMode mode, float mix, const float* acc, const float* orig,
-                        float* dst, int n)
+                        float* dst, int n, float gain = 1.f)
 {
     for (int x = 0; x < n; ++x) {
-        FinalizePixel(mode, mix, acc + 4 * x, orig ? orig + 4 * x : nullptr, dst + 4 * x);
+        FinalizePixel(mode, mix, acc + 4 * x, orig ? orig + 4 * x : nullptr, dst + 4 * x, gain);
     }
 }
 

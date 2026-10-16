@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
   g_params[BT_COLOR_MODE-1].u.pd.value = 1;
   const char* outdir = argc > 1 ? argv[1] : ".";
   A_long fmts[3] = {PF_PixelFormat_ARGB32, PF_PixelFormat_ARGB64, PF_PixelFormat_ARGB128};
-  int blendModes[4] = {1,2,3,4};
+  int blendModes[5] = {1,2,3,4,5};
   for (int bm : blendModes) for (A_long fmt : fmts) {
     g_fmt = fmt; g_checkTime.clear();
     g_params[BT_BLEND_MODE-1].u.pd.value = bm;
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
     }
     if (g_pix.size() || g_acquired) { std::printf("FAIL: leaked checkouts/suites\n"); return 1; }
     if (g_checkTime.size() != 10) { std::printf("FAIL: expected 9 samples + current\n"); return 1; }
-    if (bm == 1 && (std::fabs(o[1]-src[1]) > 1.5f/255 || std::fabs(o[2]-src[2]) > 1.5f/255 || std::fabs(o[3]-src[3]) > 1.5f/255)) { std::printf("FAIL: optical changed a static pixel\n"); return 1; }
+    if ((bm == 1 || bm == 5) && (std::fabs(o[1]-src[1]) > 1.5f/255 || std::fabs(o[2]-src[2]) > 1.5f/255 || std::fabs(o[3]-src[3]) > 1.5f/255)) { std::printf("FAIL: optical changed a static pixel\n"); return 1; }
     delete f0; delete g_output;
   }
   // Backward / forward counts are independent: 2 back, 6 forward (fractional
