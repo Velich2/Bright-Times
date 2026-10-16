@@ -65,8 +65,8 @@ tools/preview.cpp          офлайн-превью алгоритма
 
 1. Склонировать репозиторий и перейти в ветку:
    ```bat
-   git clone https://github.com/velich2/bright-times.git
-   cd bright-times
+   git clone https://github.com/Velich2/Bright-Times.git
+   cd Bright-Times
    git checkout claude/compassionate-goldberg-4jxvsv
    ```
 2. Проверить SDK и инструменты (из корня репозитория):
