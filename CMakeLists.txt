@@ -71,16 +71,34 @@ if(BT_ENABLE_OPENCL)
   target_link_libraries(BrightTimes PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+set(BT_CUDA_ARCHITECTURES "" CACHE STRING
+    "CUDA architectures to build (empty = automatic for the installed CUDA Toolkit)")
 if(BT_ENABLE_CUDA)
-  enable_language(CUDA)
-  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES 61 75 86 89)
+  # A CUDA Toolkit released before this Visual Studio would refuse its compiler;
+  # the kernels use nothing version-specific, so allow it.
+  if(MSVC AND NOT CMAKE_CUDA_FLAGS MATCHES "allow-unsupported-compiler")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -allow-unsupported-compiler")
   endif()
+  enable_language(CUDA)
+
+  set(_bt_cuda_arch "${BT_CUDA_ARCHITECTURES}")
+  if(NOT _bt_cuda_arch)
+    # Native code for common GPUs + PTX of the newest one for future GPUs.
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)      # Pascal/Volta dropped
+      set(_bt_cuda_arch 75-real 86-real 89-real 120-real 120-virtual)
+    elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)  # + Blackwell (RTX 50)
+      set(_bt_cuda_arch 61-real 75-real 86-real 89-real 120-real 120-virtual)
+    else()
+      set(_bt_cuda_arch 61-real 75-real 86-real 89-real 89-virtual)
+    endif()
+  endif()
+  message(STATUS "CUDA ${CMAKE_CUDA_COMPILER_VERSION}, architectures: ${_bt_cuda_arch}")
+
   target_sources(BrightTimes PRIVATE src/gpu/BrightTimesCUDA.cu)
   target_compile_definitions(BrightTimes PRIVATE BT_ENABLE_CUDA)
   set_target_properties(BrightTimes PROPERTIES
     CUDA_RUNTIME_LIBRARY Static
-    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+    CUDA_ARCHITECTURES "${_bt_cuda_arch}")
 endif()
 
 if(BT_ENABLE_METAL)

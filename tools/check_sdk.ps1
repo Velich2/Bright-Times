@@ -75,14 +75,14 @@ if ($ver) { Write-Host "  API version: $($ver -join '.')" }
 Write-Host "`n== Build tools ==" -ForegroundColor Cyan
 $cmake = Get-Command cmake -ErrorAction SilentlyContinue
 if ($cmake) { Good ("cmake: " + (& cmake --version | Select-Object -First 1)) }
-else { Bad "cmake not in PATH (run from 'Developer PowerShell for VS 2022', or: winget install Kitware.CMake)" }
+else { Bad "cmake not in PATH (run from 'Developer PowerShell for VS' in the Start menu)" }
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (Test-Path $vswhere) {
     $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property displayName
     if ($vs) { Good "Visual Studio C++: $vs" } else { Bad "Visual Studio with 'Desktop development with C++'" }
 } else {
-    Bad "Visual Studio 2022 (Desktop development with C++)"
+    Bad "Visual Studio 2022/2026 (Desktop development with C++)"
 }
 
 # GPU backends (optional)

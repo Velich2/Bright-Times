@@ -58,13 +58,14 @@ tools/preview.cpp          офлайн-превью алгоритма
 
 Нужен **After Effects SDK 2022 или новее** (developer.adobe.com → After Effects → SDK) и CMake ≥ 3.21.
 
-### Windows (Visual Studio 2022)
+### Windows (Visual Studio 2022 / 2026)
 
-Нужно: **Visual Studio 2022** (бесплатная Community) с нагрузкой
-**«Разработка классических приложений на C++»** — CMake входит в неё.
-Команды запускать в **Developer PowerShell for VS 2022** (меню Пуск), там `cmake` уже в PATH.
+Нужно: **Visual Studio 2022 или 2026** (бесплатная Community) с нагрузкой
+**Desktop development with C++** — CMake входит в неё.
+Команды запускать в **Developer PowerShell for VS** (меню Пуск), там `cmake` уже в PATH.
 OpenCL-SDK не нужен: плагин сам загружает `OpenCL.dll` из драйвера видеокарты.
-CUDA Toolkit — по желанию, только для CUDA-бэкенда (видеокарты NVIDIA).
+Для NVIDIA (AE с Mercury GPU Acceleration **CUDA**) — **CUDA Toolkit**, ставить **после**
+Visual Studio, чтобы установилась его интеграция с VS.
 
 1. Склонировать репозиторий и перейти в ветку:
    ```bat
@@ -77,9 +78,9 @@ CUDA Toolkit — по желанию, только для CUDA-бэкенда (�
    powershell -ExecutionPolicy Bypass -File tools\check_sdk.ps1 -SdkRoot "C:\Users\Velich\AfterEffectsSDK_26.5_win"
    ```
 3. Собрать — **все команды запускаются в корне репозитория** (папка с `CMakeLists.txt`),
-   в «x64 Native Tools Command Prompt for VS 2022» или обычном терминале:
+   в Developer PowerShell for VS (генератор — установленная Visual Studio, выбирается сам):
    ```bat
-   cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DAE_SDK_ROOT="C:/Users/Velich/AfterEffectsSDK_26.5_win" -DBT_ENABLE_CUDA=ON
+   cmake -S . -B build -A x64 -DAE_SDK_ROOT="C:/Users/Velich/AfterEffectsSDK_26.5_win" -DBT_ENABLE_CUDA=ON
    cmake --build build --config Release
    ```
    Без CUDA Toolkit — убрать `-DBT_ENABLE_CUDA=ON` (OpenCL-GPU и CPU остаются). Папка `Examples` ищется автоматически,
@@ -87,7 +88,8 @@ CUDA Toolkit — по желанию, только для CUDA-бэкенда (�
    перечислит, чего не хватает.
 
 * OpenCL включён по умолчанию и не требует SDK: `OpenCL.dll` загружается во время работы, только если AE выбрал OpenCL.
-* `-DBT_ENABLE_CUDA=ON` — нужен CUDA Toolkit; архитектуры по умолчанию `61;75;86;89` (`-DCMAKE_CUDA_ARCHITECTURES=...`).
+* `-DBT_ENABLE_CUDA=ON` — нужен CUDA Toolkit; архитектуры выбираются под версию CUDA
+  (CUDA 13: RTX 20xx и новее; CUDA 12: ещё GTX 10xx), переопределить — `-DBT_CUDA_ARCHITECTURES=...`.
 * PiPL собирается автоматически: `cl /EP` → `PiPLtool.exe` → `.rc`.
 
 Результат: `build/Release/BrightTimes.aex` → скопировать в
