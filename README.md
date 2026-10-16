@@ -61,9 +61,10 @@ tools/preview.cpp          офлайн-превью алгоритма
 * **GPU (32-bit float)**: CUDA, OpenCL, Metal — AE сам выбирает, если в *Project Settings → Video Rendering and Effects* стоит Mercury GPU Acceleration. Если фреймворк не поддержан сборкой (например, DirectX), AE автоматически рендерит на CPU.
 * **Premiere Pro, GPU** (`src/premiere/`): отдельная точка входа `xGPUFilterEntry` (GPU API Premiere,
   CUDA / Metal, кадры 32f и 16f). Соседние кадры запрашиваются через GetFrameDependencies, Clip Edges
-  учитывается. Нужен Premiere Pro SDK (`-DPR_SDK_ROOT=...`, `build.ps1` ищет его сам). С палитрой
-  Custom GPU-фильтр отказывается и Premiere рендерит этот клип на CPU (кодировка цветов в GPU API
-  не документирована).
+  учитывается. Нужен Premiere Pro SDK (`-DPR_SDK_ROOT=...`, `build.ps1` ищет его сам). Цвета Custom
+  Palette читаются как 64-битный ARGB по 16 бит на канал (кодировка в GPU API не документирована);
+  если Premiere передаст их иначе, GPU-фильтр отказывается, этот клип рендерится на CPU, а сырые
+  значения пишутся в лог (`color N: ... UNKNOWN`).
 * **Premiere Pro, CPU**: Premiere не поддерживает SmartFX и GPU-путь After Effects, поэтому без GPU
   работает классический рендер (`PF_Cmd_RENDER`, соседние кадры через `PF_CHECKOUT_PARAM`):
   та же математика на CPU, в родных форматах Premiere: BGRA 32-bit float (когда в последовательности
@@ -152,7 +153,7 @@ cmake --build build-tests && ctest --test-dir build-tests --output-on-failure
 ```
 
 * `cpu_host` — мок-хост прогоняет `EffectMain` (GLOBAL_SETUP → PARAMS_SETUP → UPDATE_PARAMS_UI → PRE_RENDER → SMART_RENDER) в 8/16/32 bpc для всех режимов; проверяет совпадение флагов с PiPL, баланс checkout/checkin и что в Optical статичные пиксели не меняются.
-* `premiere_gpu` — мок-хост Premiere гоняет `xGPUFilterEntry` (CreateInstance, GetFrameDependencies, Render) с кадрами в буферах OpenCL и сравнивает с независимым CPU-эталоном: 32f точно, 16f в пределах точности half, Clip Edges, отказ при Custom Palette.
+* `premiere_gpu` — мок-хост Premiere гоняет `xGPUFilterEntry` (CreateInstance, GetFrameDependencies, Render) с кадрами в буферах OpenCL и сравнивает с независимым CPU-эталоном: 32f точно, 16f в пределах точности half, Clip Edges, Custom Palette, отказ при неизвестной кодировке цвета.
 * `opencl_host` — тот же путь на GPU через OpenCL (подойдёт и CPU-реализация, например pocl) и сравнение с CPU: расхождение ≤ 2·10⁻⁷.
 * `bt_preview <dir>` — рендер синтетической сцены в PPM.
 

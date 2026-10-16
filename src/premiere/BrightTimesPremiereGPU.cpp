@@ -10,10 +10,10 @@
 //   - Frames: GPU_BGRA_4444_32f or _16f (half). Accumulation is always 32f.
 //   - Neighbouring frames: requested in GetFrameDependencies (sequence time,
 //     current track); Hold First/Last Frame clamps them to the clip.
-//   - Parameters: PrSDKVideoSegmentSuite::GetParam. Colours of the Custom
-//     Palette are not read on the GPU (their PrParam encoding is not
-//     documented): with Custom Palette the GPU filter declines and the
-//     32-bit float software path renders instead.
+//   - Parameters: PrSDKVideoSegmentSuite::GetParam. The PrParam encoding of
+//     colours is not documented; see PrParamReader::Color. A colour in an
+//     unknown encoding makes the GPU filter decline (Custom Palette only), and
+//     the 32-bit float software path renders instead.
 
 #include "BrightTimes.h"
 #include "BrightTimesCore.h"
@@ -29,6 +29,7 @@
 #include "PrSDKMemoryManagerSuite.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -173,17 +174,57 @@ public:
     bool      Bool(int i)     { return Num(i) != 0.0; }
     A_long    Popup(int i)    { return Int(i); }
     float     AngleDeg(int i) { return Float(i); }
-    bt::Color Color(int)      { return bt::Color{}; }  // not read on the GPU, see top of file
+
+    // Colours: Premiere passes kPrParamType_Int64 with 16 bits per channel,
+    // 0xAAAARRRRGGGGBBBB; an Int32 0xAARRGGBB is accepted too. The alpha of a
+    // colour parameter is always opaque, which identifies the layout. Anything
+    // else marks the colour as unknown (-> software path) and is logged.
+    bt::Color Color(int aeIndex)
+    {
+        PrParam p;
+        std::memset(&p, 0, sizeof(p));
+        const prSuiteError e = seg_->GetParam(node_, aeIndex - 1, time_, &p);
+        if (e != suiteError_NoError) {
+            BT_LOG("  GetParam(%d) failed: %d", aeIndex - 1, static_cast<int>(e));
+            ok_ = false;
+            return {};
+        }
+        bt::Color          c;
+        bool               known = false;
+        unsigned long long raw   = 0;
+        if (p.mType == kPrParamType_Int64) {
+            raw = static_cast<unsigned long long>(p.mInt64);
+            if ((raw >> 48) == 0xFFFF) {
+                c     = {((raw >> 32) & 0xFFFF) / 65535.f, ((raw >> 16) & 0xFFFF) / 65535.f, (raw & 0xFFFF) / 65535.f};
+                known = true;
+            }
+        } else if (p.mType == kPrParamType_Int32) {
+            raw = static_cast<std::uint32_t>(p.mInt32);
+            if ((raw >> 24) == 0xFF) {
+                c     = {((raw >> 16) & 0xFF) / 255.f, ((raw >> 8) & 0xFF) / 255.f, (raw & 0xFF) / 255.f};
+                known = true;
+            }
+        } else {
+            std::memcpy(&raw, &p.mInt64, sizeof(raw));
+        }
+        BT_LOG("  color %d: type %d raw %016llX -> %s %.3f %.3f %.3f", aeIndex - 1, static_cast<int>(p.mType), raw,
+               known ? "rgb" : "UNKNOWN", c.r, c.g, c.b);
+        colorUnknown_ = colorUnknown_ || !known;
+        return c;
+    }
+    bool colorUnknown() const { return colorUnknown_; }
 
 private:
     PrSDKVideoSegmentSuite* seg_;
     csSDK_int32             node_;
     PrTime                  time_;
-    bool                    ok_ = true;
+    bool                    ok_           = true;
+    bool                    colorUnknown_ = false;
 };
 
 // Reads the settings at clip time `t`. Returns false if the GPU cannot render
-// them (unreadable parameter, Custom Palette, GPU Acceleration off).
+// them (unreadable parameter, palette colour in an unknown encoding, GPU
+// Acceleration off).
 bool ReadPrSettings(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime t, bt::Settings& s,
                     bool& holdEdges)
 {
@@ -210,7 +251,7 @@ bool ReadPrSettings(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime t, bt:
            s.framesBackward, s.framesForward, static_cast<int>(s.frameStep), static_cast<int>(s.groups),
            static_cast<int>(s.groupMode), static_cast<int>(s.colorOrder), static_cast<int>(s.colorMode),
            static_cast<int>(s.tintMode), static_cast<int>(s.blendMode), static_cast<int>(edge), useGpu ? 1 : 0);
-    return useGpu && s.colorMode != bt::ColorMode_CUSTOM;
+    return useGpu && !(s.colorMode == bt::ColorMode_CUSTOM && r.colorUnknown());
 }
 
 // Effect duration in ticks (0 if unknown).

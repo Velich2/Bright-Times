@@ -36,7 +36,7 @@ std::vector<PF_ParamDef> g_params;
 PF_Err add_param(PF_ProgPtr, A_long, PF_ParamDef* d) { g_params.push_back(*d); return 0; }
 const PF_ParamDef& P(int aeIndex) { return g_params[aeIndex - 1]; }
 
-enum Kind { kFloat, kInt, kPopup, kBool, kAngle };
+enum Kind { kFloat, kInt, kPopup, kBool, kAngle, kColor };
 Kind KindOf(int i)
 {
     switch (i) {
@@ -45,7 +45,7 @@ Kind KindOf(int i)
         case BT_INCLUDE_CURRENT: case BT_CURRENT_UNTINTED: case BT_REVERSE_COLORS: case BT_USE_GPU: return kBool;
         case BT_FRAME_STEP: case BT_GROUPS: case BT_PALETTE_SIZE: return kInt;
         case BT_HUE_START: return kAngle;
-        default: return kFloat;
+        default: return i >= BT_COLOR_1 && i < BT_COLOR_1 + bt::kMaxCustomColor ? kColor : kFloat;
     }
 }
 
@@ -80,6 +80,7 @@ MockPPix* NewPPix(PrPixelFormat fmt, int w, int h)
 }
 
 int g_paramReads = 0;
+bool g_colorUnknownEncoding = false;  // colours as Float64 (an encoding the filter does not know)
 PrTime g_durationTicks = 0;
 
 prSuiteError GetDeviceInfo(csSDK_uint32, csSDK_uint32, PrGPUDeviceInfo* info)
@@ -131,6 +132,13 @@ prSuiteError GetParam(csSDK_int32, csSDK_int32 index, PrTime, PrParam* out)
         case kInt:   out->mType = kPrParamType_Int32; out->mInt32 = d.u.sd.value; break;
         case kBool:  out->mType = kPrParamType_Bool;  out->mBool = d.u.bd.value ? 1 : 0; break;
         case kAngle: out->mType = kPrParamType_Float64; out->mFloat64 = d.u.ad.value / 65536.0; break;
+        case kColor: {  // Int64, 16 bits per channel 0xAAAARRRRGGGGBBBB
+            const PF_Pixel c = d.u.cd.value;
+            if (g_colorUnknownEncoding) { out->mType = kPrParamType_Float64; out->mFloat64 = c.red; break; }
+            out->mType  = kPrParamType_Int64;
+            out->mInt64 = (csSDK_int64)((0xFFFFull << 48) | (c.red * 257ull << 32) | (c.green * 257ull << 16) | c.blue * 257ull);
+            break;
+        }
         default:     out->mType = kPrParamType_Float64; out->mFloat64 = d.u.fs_d.value; break;
     }
     return suiteError_NoError;
@@ -312,7 +320,29 @@ int main()
         std::printf("%-26s max|gpu-ref| = %.2e  %s %s\n", c.name, d, ok ? "OK" : "FAIL", why.c_str());
     }
 
-    // Declines (-> Premiere software path): Custom Palette, GPU Acceleration off.
+    // Custom Palette on the GPU: colours read through GetParam.
+    {
+        const std::vector<PF_ParamDef> saved = g_params;
+        g_params[BT_COLOR_MODE - 1].u.pd.value   = bt::ColorMode_CUSTOM;
+        g_params[BT_GROUPS - 1].u.sd.value       = 3;
+        g_params[BT_PALETTE_SIZE - 1].u.sd.value = 3;
+        g_params[BT_COLOR_1 - 1].u.cd.value      = PF_Pixel{255, 255, 128, 0};
+        g_params[BT_COLOR_1].u.cd.value          = PF_Pixel{255, 0, 64, 255};
+        g_params[BT_COLOR_1 + 1].u.cd.value      = PF_Pixel{255, 200, 0, 180};
+        for (int blend : {1, 5}) {
+            g_params[BT_BLEND_MODE - 1].u.pd.value = blend;
+            std::string why;
+            const double d = RunGpu(10, kGpu32f, true, &why);
+            const bool ok = d >= 0 && d <= 1e-5;
+            fails += !ok;
+            std::printf("%-26s max|gpu-ref| = %.2e  %s %s\n", blend == 1 ? "custom palette optical" : "custom palette trails",
+                        d, ok ? "OK" : "FAIL", why.c_str());
+        }
+        g_params = saved;
+    }
+
+    // Declines (-> Premiere software path): palette colours in an unknown
+    // encoding, GPU Acceleration off.
     auto declines = [&](int param, A_long value, bool popup) {
         PF_ParamDef saved = g_params[param - 1];
         if (popup) g_params[param - 1].u.pd.value = value; else g_params[param - 1].u.bd.value = value;
@@ -322,9 +352,14 @@ int main()
         g_params[param - 1] = saved;
         return declined;
     };
+    g_colorUnknownEncoding = true;
     const bool d1 = declines(BT_COLOR_MODE, bt::ColorMode_CUSTOM, true);
+    const bool k1 = !declines(BT_COLOR_MODE, bt::ColorMode_SPECTRUM, true);  // colours are not read then
+    g_colorUnknownEncoding = false;
     const bool d2 = declines(BT_USE_GPU, 0, false);
-    std::printf("declines: custom palette %s, GPU off %s\n", d1 ? "OK" : "FAIL", d2 ? "OK" : "FAIL");
+    std::printf("declines: unknown colour encoding %s, GPU off %s; spectrum kept %s\n", d1 ? "OK" : "FAIL",
+                d2 ? "OK" : "FAIL", k1 ? "OK" : "FAIL");
+    fails += !k1;
     fails += !d1 + !d2;
 
     index = 0;
