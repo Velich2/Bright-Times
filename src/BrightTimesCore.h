@@ -31,6 +31,9 @@ struct Color {
 
 enum ColorMode { ColorMode_SPECTRUM = 1, ColorMode_RGB, ColorMode_CUSTOM };
 enum GroupMode { GroupMode_SEQUENTIAL = 1, GroupMode_CYCLIC };
+// Which frames get Color 1: the ones nearest the current frame (colours run
+// outwards, mirrored on both sides) or the earliest ones (past -> future).
+enum ColorOrder { ColorOrder_OUTWARD = 1, ColorOrder_TIME };
 enum TintMode  { TintMode_FILTER = 1, TintMode_LUMA };
 enum BlendMode { BlendMode_OPTICAL = 1, BlendMode_ADDITIVE, BlendMode_SCREEN, BlendMode_LIGHTEN,
                  BlendMode_TRAILS };
@@ -50,6 +53,7 @@ struct Settings {
     // Groups & colours
     int       groups        = 7;
     GroupMode groupMode     = GroupMode_SEQUENTIAL;
+    ColorOrder colorOrder   = ColorOrder_OUTWARD;
     float     groupSoftness = 0.f;   // 0..1, blends colours of neighbouring groups
     ColorMode colorMode     = ColorMode_SPECTRUM;
     float     hueStart      = 0.f;   // degrees
@@ -207,12 +211,29 @@ inline std::vector<Sample> BuildSamples(const Settings& sIn)
         }
     }
     const int m = static_cast<int>(grouped.size());
+    // rank[i]: position of the sample in colour order, 0..ranks-1.
+    std::vector<int> rank(m);
+    int              ranks = m;
+    if (s.colorOrder == ColorOrder_OUTWARD) {
+        // By distance from the current frame; both sides share a rank.
+        std::vector<int> dists;
+        for (const Sample* p : grouped) dists.push_back(p->frameOffset < 0 ? -p->frameOffset : p->frameOffset);
+        std::vector<int> uniq = dists;
+        std::sort(uniq.begin(), uniq.end());
+        uniq.erase(std::unique(uniq.begin(), uniq.end()), uniq.end());
+        ranks = static_cast<int>(uniq.size());
+        for (int i = 0; i < m; ++i) {
+            rank[i] = static_cast<int>(std::lower_bound(uniq.begin(), uniq.end(), dists[i]) - uniq.begin());
+        }
+    } else {
+        for (int i = 0; i < m; ++i) rank[i] = i;  // samples are ordered past -> future
+    }
     for (int i = 0; i < m; ++i) {
         if (s.groupMode == GroupMode_CYCLIC) {
-            grouped[i]->tint = GroupColor(s, i % s.groups);
+            grouped[i]->tint = GroupColor(s, rank[i] % s.groups);
         } else {
             // Continuous position of the sample in group space: [0, groups).
-            const float pos = (static_cast<float>(i) + 0.5f) * s.groups / static_cast<float>(m);
+            const float pos = (static_cast<float>(rank[i]) + 0.5f) * s.groups / static_cast<float>(ranks);
             grouped[i]->tint = GroupColorSmooth(s, pos);
         }
     }

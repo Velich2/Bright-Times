@@ -4,6 +4,7 @@
 // property of the Optical mode.
 #include "ae_stub.h"
 #include "BrightTimes.h"
+#include "BrightTimesCore.h"
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -195,6 +196,29 @@ int main(int argc, char** argv) {
     std::printf("clip edges: OK\n");
     g_clipStart = -1000000; g_clipEnd = 1000000; in.total_time = 0; in.current_time = 5;
     g_params[BT_EDGE_MODE-1].u.pd.value = BT_EDGE_HOLD;
+  }
+  // Colour order: with "From Current Frame", Color 1 is at the current frame and
+  // the colours run outwards (mirrored on both sides); "Past to Future" starts
+  // with the earliest frame.
+  {
+    bt::Settings s;
+    s.framesBackward = 8; s.framesForward = 0; s.groups = 3; s.colorMode = bt::ColorMode_CUSTOM;
+    s.customCount = 3; s.custom[0] = {0, 0, 1}; s.custom[1] = {1, 0, 0}; s.custom[2] = {0, 1, 0};
+    auto colorAt = [](const std::vector<bt::Sample>& v, int off) -> int {
+      for (const auto& k : v) if (k.frameOffset == off) return k.tint.b > 0.5f ? 1 : (k.tint.r > 0.5f ? 2 : 3);
+      return 0;
+    };
+    auto out = bt::BuildSamples(s);
+    bool ok = colorAt(out, 0) == 1 && colorAt(out, -2) == 1 && colorAt(out, -3) == 2 &&
+              colorAt(out, -5) == 2 && colorAt(out, -6) == 3 && colorAt(out, -8) == 3;
+    s.colorOrder = bt::ColorOrder_TIME;
+    auto time = bt::BuildSamples(s);
+    ok = ok && colorAt(time, -8) == 1 && colorAt(time, 0) == 3;
+    s.colorOrder = bt::ColorOrder_OUTWARD; s.framesForward = 8;
+    auto both = bt::BuildSamples(s);
+    for (int d = 1; d <= 8; ++d) ok = ok && colorAt(both, -d) == colorAt(both, d);
+    std::printf("color order: %s\n", ok ? "OK" : "FAIL");
+    if (!ok) return 1;
   }
   std::printf("checkout times:"); for (auto& kv : g_checkTime) std::printf(" %d@%d", kv.first, kv.second); std::printf("\n");
   std::printf("ALL OK\n");

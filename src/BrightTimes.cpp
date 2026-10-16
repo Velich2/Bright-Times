@@ -124,6 +124,7 @@ PF_Err ReadSettings(PF_InData* in_data, bt::Settings& s)
 
     s.groups          = r.Int(BT_GROUPS);
     s.groupMode       = static_cast<bt::GroupMode>(r.Popup(BT_GROUP_MODE));
+    s.colorOrder      = static_cast<bt::ColorOrder>(r.Popup(BT_COLOR_ORDER));
     s.groupSoftness   = r.Float(BT_GROUP_SOFTNESS) / 100.f;
     s.colorMode       = static_cast<bt::ColorMode>(r.Popup(BT_COLOR_MODE));
     s.hueStart        = r.AngleDeg(BT_HUE_START);
@@ -188,6 +189,11 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data)
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("Group Order", 2, bt::GroupMode_SEQUENTIAL,
                   "Sequential (by time)|Cyclic", PF_ParamFlag_SUPERVISE, ID_GROUP_MODE);
+
+    // Color 1 at the current frame (outwards) or at the earliest frame.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Color Order", 2, bt::ColorOrder_OUTWARD,
+                  "From Current Frame|Past to Future", 0, ID_COLOR_ORDER);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Group Softness", 0, 100, 0, 100, 0, 1,

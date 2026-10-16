@@ -23,6 +23,7 @@
 | **Keep Current Untinted** | Текущий кадр не окрашивается (белый фильтр) и не входит в группы. |
 | **Groups & Colors → Number of Groups** | На сколько цветовых групп делятся кадры (1–16). |
 | **Group Order** | *Sequential* — группы идут по времени (прошлое → будущее, как радуга на референсе); *Cyclic* — кадры раздаются группам по кругу (классический RGB-«Harris shutter»). |
+| **Color Order** | *From Current Frame* (по умолчанию) — Color 1 у текущего кадра, дальше цвета идут наружу, одинаково назад и вперёд; *Past to Future* — Color 1 у самого раннего кадра, последний цвет у самого позднего (радуга через время). |
 | **Group Softness** | Плавный переход цвета между соседними группами (0 % — жёсткие ступени). |
 | **Color Mode** | *Spectrum* (Hue Start / Hue Range / Saturation), *RGB Tri-Color*, *Custom Palette* (Palette Size + Color 1…6). |
 | **Reverse Colors** | Развернуть порядок цветов. |

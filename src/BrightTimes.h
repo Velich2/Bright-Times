@@ -48,6 +48,7 @@ enum {
     BT_COLOR_TOPIC_START,
     BT_GROUPS,
     BT_GROUP_MODE,
+    BT_COLOR_ORDER,
     BT_GROUP_SOFTNESS,
     BT_COLOR_MODE,
     BT_HUE_START,
@@ -114,7 +115,8 @@ enum {
     ID_MIX,
     ID_USE_GPU,
     ID_EDGE_MODE,
-    ID_COLOR_BALANCE
+    ID_COLOR_BALANCE,
+    ID_COLOR_ORDER
 };
 
 // "Clip Edges" popup values.
