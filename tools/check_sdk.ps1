@@ -57,6 +57,7 @@ foreach ($f in $files) {
 # between files across SDK releases); the file where each one lives is shown.
 $symbols = @(
     "PF_PluginDataCB2",
+    "PF_Cmd_SMART_RENDER_GPU",
     "PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT",
     "PF_OutFlag2_SUPPORTS_GPU_RENDER_F32",
     "PF_OutFlag2_SUPPORTS_THREADED_RENDERING",

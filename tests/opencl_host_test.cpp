@@ -71,7 +71,7 @@ static std::vector<float> run(bool gpu) {  // returns RGBA straight per pixel
   g_out = newWorld(W, H, 0, 0); upload(g_out);
   PF_SmartRenderInput sin{}; sin.pre_render_data = pout.pre_render_data; sin.what_gpu = pin.what_gpu; sin.gpu_data = g_gpuData;
   PF_SmartRenderCallbacks scb{checkout_layer_pixels, checkin_layer_pixels, checkout_output}; PF_SmartRenderExtra sex{&sin,&scb};
-  if (PF_Err e = EffectMain(PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex)) { printf("render %d\n", e); exit(1); }
+  if (PF_Err e = EffectMain(gpu ? PF_Cmd_SMART_RENDER_GPU : PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex)) { printf("render %d\n", e); exit(1); }
   pout.delete_pre_render_data_func(pout.pre_render_data);
   if (gpu) clFinish(g_q);
   download(g_out);
@@ -106,6 +106,18 @@ int main() {
     double maxd = 0, sum = 0; for (size_t i=0;i<a.size();++i) { double d = std::fabs(a[i]-b[i]); maxd = std::max(maxd, d); sum += a[i]; }
     bool ok = maxd < 1e-4; fails += !ok;
     printf("blend %d tint %d mix %.0f shift %d : max|cpu-gpu| = %.2e  mean %.4f  %s\n", c.blend, c.tint, c.mix, c.shift, maxd, sum/a.size(), ok ? "OK" : "FAIL");
+  }
+  // "GPU Acceleration" off: PreRender must not offer the GPU path.
+  {
+    g_params[BT_USE_GPU-1].u.bd.value = 0;
+    PF_PreRenderInput pin{}; pin.what_gpu = PF_GPU_Framework_OPENCL; pin.gpu_data = g_gpuData;
+    PF_PreRenderOutput pout{}; PF_PreRenderCallbacks pcb{checkout_layer}; PF_PreRenderExtra pex{&pin,&pout,&pcb};
+    EffectMain(PF_Cmd_SMART_PRE_RENDER, &in, &out, nullptr, nullptr, &pex);
+    pout.delete_pre_render_data_func(pout.pre_render_data);
+    const bool ok = !(pout.flags & PF_RenderOutputFlag_GPU_RENDER_POSSIBLE);
+    fails += !ok;
+    printf("GPU Acceleration off -> CPU only: %s\n", ok ? "OK" : "FAIL");
+    g_params[BT_USE_GPU-1].u.bd.value = 1;
   }
   PF_GPUDeviceSetdownInput di{g_gpuData, PF_GPU_Framework_OPENCL, 0}; PF_GPUDeviceSetdownExtra dx{&di};
   EffectMain(PF_Cmd_GPU_DEVICE_SETDOWN, &in, &out, nullptr, nullptr, &dx);

@@ -72,6 +72,7 @@ enum {
     BT_BLEND_MODE,
     BT_INTENSITY,
     BT_MIX,
+    BT_USE_GPU,
 
     BT_NUM_PARAMS
 };
@@ -108,7 +109,8 @@ enum {
     ID_TINT_MODE,
     ID_BLEND_MODE,
     ID_INTENSITY,
-    ID_MIX
+    ID_MIX,
+    ID_USE_GPU
 };
 
 extern "C" {

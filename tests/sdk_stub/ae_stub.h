@@ -54,7 +54,7 @@ struct PF_OutData { A_u_long my_version; A_char return_msg[256]; A_long out_flag
 #define ERR2(F) do { if (((err2 = (F)) != PF_Err_NONE) && !err) err = err2; } while (0)
 #define PF_VERSION(a,b,c,d,e) (((a)<<19)|((b)<<15)|((c)<<11)|((d)<<9)|(e))
 enum { PF_Stage_DEVELOP = 0 };
-enum { PF_Cmd_ABOUT=0, PF_Cmd_GLOBAL_SETUP, PF_Cmd_PARAMS_SETUP=4, PF_Cmd_USER_CHANGED_PARAM=13, PF_Cmd_UPDATE_PARAMS_UI=14, PF_Cmd_SMART_PRE_RENDER=23, PF_Cmd_SMART_RENDER };
+enum { PF_Cmd_ABOUT=0, PF_Cmd_GLOBAL_SETUP, PF_Cmd_PARAMS_SETUP=4, PF_Cmd_USER_CHANGED_PARAM=13, PF_Cmd_UPDATE_PARAMS_UI=14, PF_Cmd_SMART_PRE_RENDER=23, PF_Cmd_SMART_RENDER=24, PF_Cmd_SMART_RENDER_GPU=31 };
 enum { PF_OutFlag_WIDE_TIME_INPUT=2, PF_OutFlag_DEEP_COLOR_AWARE=33554432, PF_OutFlag_SEND_UPDATE_PARAMS_UI=67108864 };
 enum { PF_OutFlag2_SUPPORTS_SMART_RENDER=1024, PF_OutFlag2_FLOAT_COLOR_AWARE=4096, PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT=131072, PF_OutFlag2_SUPPORTS_THREADED_RENDERING=134217728 };
 enum { PF_PUI_DISABLED = 32 }; enum { PF_ParamFlag_SUPERVISE = 64 }; enum { PF_ValueDisplayFlag_NONE=0, PF_ValueDisplayFlag_PERCENT=1 };

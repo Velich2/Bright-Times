@@ -31,6 +31,7 @@
 | **Blend Mode** | *Optical (Balanced)* — по-канальная нормировка, статичное не меняется; *Additive*; *Screen*; *Lighten*. |
 | **Intensity** | Усиление. |
 | **Mix with Original** | Смешивание с исходным кадром. |
+| **GPU Acceleration** | Вкл. — считать на видеокарте (CUDA / OpenCL / Metal), если в AE включено Mercury GPU Acceleration; выкл. — всегда на CPU. |
 
 ## Как устроено
 

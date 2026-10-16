@@ -25,6 +25,7 @@ constexpr A_long kCurrentFrameCheckoutId = 10000;
 struct RenderData {
     bt::Settings             settings;
     std::vector<bt::Sample>  samples;
+    bool                     useGpu = true;
 };
 
 void DeleteRenderData(void* p)
@@ -255,6 +256,10 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data)
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Mix with Original", 0, 100, 0, 100, 100, 1,
                          PF_ValueDisplayFlag_PERCENT, 0, ID_MIX);
+
+    // Off = always render on the CPU (After Effects then skips the GPU path).
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("GPU Acceleration", TRUE, 0, ID_USE_GPU);
 
     out_data->num_params = BT_NUM_PARAMS;
     return err;
@@ -655,6 +660,12 @@ PF_Err PreRender(PF_InData* in_data, PF_PreRenderExtra* extra)
     std::unique_ptr<RenderData> rd(new RenderData);
     ERR(ReadSettings(in_data, rd->settings));
     if (err) return err;
+    {
+        ParamReader r(in_data);
+        rd->useGpu = r.Bool(BT_USE_GPU);
+        ERR(r.err());
+        if (err) return err;
+    }
     rd->samples = bt::BuildSamples(rd->settings);
 
     const PF_RenderRequest req = extra->input->output_request;
@@ -680,7 +691,8 @@ PF_Err PreRender(PF_InData* in_data, PF_PreRenderExtra* extra)
     checkout(kCurrentFrameCheckoutId, 0);
     if (err) return err;
 
-    if (extra->input->what_gpu != PF_GPU_Framework_NONE && btgpu::IsSupported(extra->input->what_gpu)) {
+    if (rd->useGpu && extra->input->what_gpu != PF_GPU_Framework_NONE &&
+        btgpu::IsSupported(extra->input->what_gpu)) {
         extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
     }
     extra->output->result_rect                = result;
@@ -690,7 +702,9 @@ PF_Err PreRender(PF_InData* in_data, PF_PreRenderExtra* extra)
     return err;
 }
 
-PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra)
+// After Effects sends PF_Cmd_SMART_RENDER_GPU when PreRender allowed the GPU and
+// the device was set up, and PF_Cmd_SMART_RENDER for the CPU.
+PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra, bool gpu)
 {
     PF_Err err = PF_Err_NONE;
     const RenderData* rd = static_cast<const RenderData*>(extra->input->pre_render_data);
@@ -700,7 +714,8 @@ PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra)
     ERR(extra->cb->checkout_output(in_data->effect_ref, &out));
     if (err || !out) return err;
 
-    if (extra->input->what_gpu != PF_GPU_Framework_NONE) {
+    if (gpu) {
+        if (extra->input->what_gpu == PF_GPU_Framework_NONE) return PF_Err_BAD_CALLBACK_PARAM;
         return RenderGPU(in_data, extra, *rd, out);
     }
 
@@ -770,7 +785,10 @@ extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutDat
                 err = PreRender(in_data, static_cast<PF_PreRenderExtra*>(extra));
                 break;
             case PF_Cmd_SMART_RENDER:
-                err = SmartRender(in_data, static_cast<PF_SmartRenderExtra*>(extra));
+                err = SmartRender(in_data, static_cast<PF_SmartRenderExtra*>(extra), false);
+                break;
+            case PF_Cmd_SMART_RENDER_GPU:
+                err = SmartRender(in_data, static_cast<PF_SmartRenderExtra*>(extra), true);
                 break;
             case PF_Cmd_GPU_DEVICE_SETUP:
                 err = GpuDeviceSetup(in_data, out_data, static_cast<PF_GPUDeviceSetupExtra*>(extra));
