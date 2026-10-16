@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
   PF_InData in{}; in.inter = {checkout_param, checkin_param, add_param, abort_cb}; in.time_step = 1; in.time_scale = 24; in.current_time = 5; in.pica_basicP = &basic;
   PF_OutData out{};
   if (PluginDataEntryFunction2(nullptr, register_cb, nullptr, "AE", "26.5") != 0 ||
-      g_regName != "Bright Times" || g_regMatch != "DVLN BrightTimes" || g_regCategory != "Time" ||
+      g_regName != "Bright Times" || g_regMatch != "DVLN BrightTimes" || g_regCategory != "Bright Times" ||
       g_regEntry != "EffectMain" || g_regKind != 0x65464B54 || g_regMajor != PF_PLUG_IN_VERSION ||
       g_regMinor != PF_PLUG_IN_SUBVERS || g_regReserved != 8) { std::printf("FAIL: plug-in registration\n"); return 1; }
   std::printf("registration: OK\n");

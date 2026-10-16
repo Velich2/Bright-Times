@@ -18,7 +18,7 @@ resource 'PiPL' (16000) {
 			"Bright Times"
 		},
 		Category {
-			"Time"
+			"Bright Times"
 		},
 #ifdef AE_OS_WIN
 	#if defined(AE_PROC_INTELx64)

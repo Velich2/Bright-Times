@@ -112,7 +112,7 @@ Metal включён по умолчанию, бандл универсальн�
 Результат: `BrightTimes.plugin` → `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/`
 (для распространения — подписать/нотаризовать).
 
-После установки: *Effect → Time → Bright Times*.
+После установки: *Effect → Bright Times → Bright Times*.
 
 ## Тесты (без After Effects)
 

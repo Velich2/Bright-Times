@@ -19,7 +19,7 @@
 
 #define BT_NAME          "Bright Times"
 #define BT_MATCH_NAME    "DVLN BrightTimes"
-#define BT_CATEGORY      "Time"
+#define BT_CATEGORY      "Bright Times"
 #define BT_DESCRIPTION   "Temporal colour separation with optical superimposition."
 
 #define BT_MAJOR_VERSION 1

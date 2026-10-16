@@ -119,7 +119,7 @@ if ($Install) {
     try {
         New-Item -ItemType Directory -Force -Path $target | Out-Null
         Copy-Item -Force $aex $target
-        Write-Host "Installed to $target - restart After Effects: Effect > Time > Bright Times" -ForegroundColor Green
+        Write-Host "Installed to $target - restart After Effects: Effect > Bright Times > Bright Times" -ForegroundColor Green
     } catch {
         Fail "Could not copy to $target. Run PowerShell as Administrator, or copy the file manually."
     }
