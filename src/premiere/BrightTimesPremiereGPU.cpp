@@ -18,6 +18,7 @@
 #include "BrightTimes.h"
 #include "BrightTimesCore.h"
 #include "BrightTimesSettings.h"
+#include "BrightTimesLog.h"
 #include "gpu/BrightTimesGPU.h"
 
 #include "PrSDKGPUFilter.h"
@@ -30,6 +31,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <map>
 #include <mutex>
 #include <new>
@@ -66,6 +68,7 @@ struct PrSuites {
             seg = (PrSDKVideoSegmentSuite*)p;
         if (sp->AcquireSuite(kPrSDKMemoryManagerSuite, kPrSDKMemoryManagerSuiteVersion, &p) == kSPNoError)
             mem = (PrSDKMemoryManagerSuite*)p;
+        BT_LOG("  suites: gpu %d ppix %d segment %d memory %d", gpu ? 1 : 0, ppix ? 1 : 0, seg ? 1 : 0, mem ? 1 : 0);
         return gpu && ppix && seg && mem;
     }
 
@@ -144,7 +147,9 @@ public:
     {
         PrParam p;
         std::memset(&p, 0, sizeof(p));
-        if (seg_->GetParam(node_, aeIndex - 1, time_, &p) != suiteError_NoError) {
+        const prSuiteError e = seg_->GetParam(node_, aeIndex - 1, time_, &p);
+        if (e != suiteError_NoError) {
+            BT_LOG("  GetParam(%d) failed: %d", aeIndex - 1, static_cast<int>(e));
             ok_ = false;
             return 0.0;
         }
@@ -156,7 +161,10 @@ public:
             case kPrParamType_Float32: return p.mFloat32;
             case kPrParamType_Float64: return p.mFloat64;
             case kPrParamType_Bool:    return p.mBool ? 1.0 : 0.0;
-            default:                   ok_ = false; return 0.0;
+            default:
+                BT_LOG("  GetParam(%d): unexpected type %d", aeIndex - 1, static_cast<int>(p.mType));
+                ok_ = false;
+                return 0.0;
         }
     }
 
@@ -197,6 +205,11 @@ bool ReadPrSettings(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime t, bt:
         s.blendMode  = static_cast<bt::BlendMode>(s.blendMode + 1);
     }
     holdEdges = edge == BT_EDGE_HOLD;
+    BT_LOG("  settings: back %d fwd %d step %d groups %d groupMode %d order %d colorMode %d tint %d blend %d "
+           "edge %d gpu %d",
+           s.framesBackward, s.framesForward, static_cast<int>(s.frameStep), static_cast<int>(s.groups),
+           static_cast<int>(s.groupMode), static_cast<int>(s.colorOrder), static_cast<int>(s.colorMode),
+           static_cast<int>(s.tintMode), static_cast<int>(s.blendMode), static_cast<int>(edge), useGpu ? 1 : 0);
     return useGpu && s.colorMode != bt::ColorMode_CUSTOM;
 }
 
@@ -260,8 +273,10 @@ bool BuildPlan(const Instance& inst, csSDK_int32 node, const PrGPUFilterRenderPa
     return true;
 }
 
-prSuiteError CreateInstance(PrGPUFilterInstance* io)
+prSuiteError CreateInstanceImpl(PrGPUFilterInstance* io)
 {
+    BT_LOG("GPU CreateInstance node=%d device=%u", static_cast<int>(io->inNodeID),
+           static_cast<unsigned>(io->inDeviceIndex));
     Instance* inst = new (std::nothrow) Instance;
     if (!inst) return suiteError_Fail;
     inst->deviceIndex = io->inDeviceIndex;
@@ -271,6 +286,11 @@ prSuiteError CreateInstance(PrGPUFilterInstance* io)
     std::memset(&info, 0, sizeof(info));
     ok = ok && inst->suites.gpu->GetDeviceInfo(kPrSDKGPUDeviceSuiteVersion, io->inDeviceIndex, &info) ==
                    suiteError_NoError;
+    if (ok) {
+        BT_LOG("  device: framework %d meets requirements %d device %p context %p queue %p",
+               static_cast<int>(info.outDeviceFramework), static_cast<int>(info.outMeetsMinimumRequirementsForAcceleration),
+               info.outDeviceHandle, info.outContextHandle, info.outCommandQueueHandle);
+    }
     ok = ok && info.outMeetsMinimumRequirementsForAcceleration;
 
     if (ok) {
@@ -281,6 +301,7 @@ prSuiteError CreateInstance(PrGPUFilterInstance* io)
         void* data          = nullptr;
         ok = btgpu::IsSupported(inst->dev.framework) && GetBackend(inst->dev, io->inDeviceIndex, &data);
         inst->dev.data = data;
+        BT_LOG("  backend for framework %d: %d", static_cast<int>(inst->dev.framework), ok ? 1 : 0);
     }
     if (ok) {
         // Opt out when the settings need the software path (checked at the
@@ -290,17 +311,20 @@ prSuiteError CreateInstance(PrGPUFilterInstance* io)
         ok = ReadPrSettings(inst->suites.seg, io->inNodeID, 0, s, hold);
     }
     if (!ok) {
+        BT_LOG("  -> declined (software render)");
         inst->suites.Release();
         delete inst;
         return suiteError_Fail;  // -> software rendering for this clip
     }
+    BT_LOG("  -> GPU instance %p", static_cast<void*>(inst));
     io->ioPrivatePluginData = inst;
     io->outIsRealtime       = kPrTrue;
     return suiteError_NoError;
 }
 
-prSuiteError DisposeInstance(PrGPUFilterInstance* io)
+prSuiteError DisposeInstanceImpl(PrGPUFilterInstance* io)
 {
+    BT_LOG("GPU DisposeInstance %p", io->ioPrivatePluginData);
     Instance* inst = static_cast<Instance*>(io->ioPrivatePluginData);
     if (inst) {
         inst->suites.Release();
@@ -310,12 +334,16 @@ prSuiteError DisposeInstance(PrGPUFilterInstance* io)
     return suiteError_NoError;
 }
 
-prSuiteError GetFrameDependencies(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp,
-                                  csSDK_int32* ioQueryIndex, PrGPUFilterFrameDependency* out)
+prSuiteError GetFrameDependenciesImpl(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp,
+                                      csSDK_int32* ioQueryIndex, PrGPUFilterFrameDependency* out)
 {
     const Instance* inst = static_cast<const Instance*>(io->ioPrivatePluginData);
-    SamplePlan      plan;
-    if (!inst || !BuildPlan(*inst, io->inNodeID, rp, plan)) return suiteError_NotImplemented;
+    if (!inst || !rp || !ioQueryIndex || !out) return suiteError_NotImplemented;
+    BT_LOG("GPU GetFrameDependencies index=%d seq=%lld clip=%lld tpf=%lld", static_cast<int>(*ioQueryIndex),
+           static_cast<long long>(rp->inSequenceTime), static_cast<long long>(rp->inClipTime),
+           static_cast<long long>(rp->inRenderTicksPerFrame));
+    SamplePlan plan;
+    if (!BuildPlan(*inst, io->inNodeID, rp, plan)) return suiteError_NotImplemented;
 
     const csSDK_int32 index = *ioQueryIndex;
     if (index < 0 || index >= static_cast<csSDK_int32>(plan.dependencies.size())) {
@@ -325,6 +353,8 @@ prSuiteError GetFrameDependencies(PrGPUFilterInstance* io, const PrGPUFilterRend
     out->outDependencyType = PrGPUDependency_InputFrame;
     out->outTrackID        = 0;  // current track
     out->outSequenceTime   = plan.dependencies[index];
+    BT_LOG("  dependency %d of %d: %lld", static_cast<int>(index), static_cast<int>(plan.dependencies.size()),
+           static_cast<long long>(out->outSequenceTime));
     if (index + 1 < static_cast<csSDK_int32>(plan.dependencies.size())) {
         ++*ioQueryIndex;  // more to come
     }
@@ -364,19 +394,33 @@ bool Describe(const PrSuites& su, PPixHand frame, GpuFrame& f)
     return f.mem != nullptr;
 }
 
-prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, const PPixHand* inFrames,
-                    csSDK_size_t inFrameCount, PPixHand* outFrame)
+prSuiteError RenderImpl(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, const PPixHand* inFrames,
+                        csSDK_size_t inFrameCount, PPixHand* outFrame)
 {
     Instance* inst = static_cast<Instance*>(io->ioPrivatePluginData);
-    if (!inst || !inFrames || inFrameCount < 1 || !outFrame) return suiteError_Fail;
+    BT_LOG("GPU Render frames=%d seq=%lld clip=%lld", static_cast<int>(inFrameCount),
+           rp ? static_cast<long long>(rp->inSequenceTime) : 0LL, rp ? static_cast<long long>(rp->inClipTime) : 0LL);
+    if (!inst || !rp || !inFrames || inFrameCount < 1 || !outFrame) return suiteError_Fail;
     const PrSuites& su = inst->suites;
 
     SamplePlan plan;
-    if (!BuildPlan(*inst, io->inNodeID, rp, plan)) return suiteError_Fail;
-    if (inFrameCount < plan.dependencies.size() + 1) return suiteError_Fail;
+    if (!BuildPlan(*inst, io->inNodeID, rp, plan)) {
+        BT_LOG("  settings unreadable");
+        return suiteError_Fail;
+    }
+    if (inFrameCount < plan.dependencies.size() + 1) {
+        // Fewer frames than requested: the missing ones fall back to the current frame.
+        BT_LOG("  expected %d frames, got %d", static_cast<int>(plan.dependencies.size() + 1),
+               static_cast<int>(inFrameCount));
+    }
 
     GpuFrame current;
-    if (!Describe(su, inFrames[0], current)) return suiteError_Fail;
+    if (!Describe(su, inFrames[0], current)) {
+        BT_LOG("  current frame: unsupported format %08X or no GPU data", static_cast<unsigned>(current.format));
+        return suiteError_Fail;
+    }
+    BT_LOG("  current %dx%d pitch %d half %d mem %p", current.width, current.height, current.pitch,
+           current.half ? 1 : 0, current.mem);
 
     csSDK_uint32 parNum = 1, parDen = 1;
     su.ppix->GetPixelAspectRatio(inFrames[0], &parNum, &parDen);
@@ -391,6 +435,7 @@ prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, 
                                     static_cast<int>(parNum), static_cast<int>(parDen),
                                     rp->inRenderFieldType, &accHand) == suiteError_NoError &&
               Describe(su, outHand, out) && Describe(su, accHand, acc);
+    BT_LOG("  buffers %d: out pitch %d acc pitch %d", ok ? 1 : 0, out.pitch, acc.pitch);
 
     const bt::Settings& s = plan.settings;
     BtGpuParams base;
@@ -422,6 +467,7 @@ prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, 
         for (size_t d = 0; d < plan.dependencies.size(); ++d) {
             if (plan.dependencies[d] == plan.times[i]) frameIndex = d + 1;
         }
+        if (frameIndex >= inFrameCount) frameIndex = 0;
         GpuFrame src;
         if (!Describe(su, inFrames[frameIndex], src)) continue;  // nothing there: transparent
         const bt::Sample& k = plan.samples[i];
@@ -429,6 +475,7 @@ prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, 
         source(src, p);
         p.kr = k.kr; p.kg = k.kg; p.kb = k.kb; p.ka = k.ka;
         ok = btgpu::Dispatch(inst->dev, BT_KERNEL_ACCUMULATE, src.mem, acc.mem, nullptr, p);
+        if (!ok) BT_LOG("  accumulate %d failed", static_cast<int>(i));
     }
     if (ok) {
         BtGpuParams p = base;
@@ -445,11 +492,53 @@ prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, 
         su.ppix->Dispose(accHand);
     }
     if (!ok) {
+        BT_LOG("  render failed");
         if (outHand) su.ppix->Dispose(outHand);
         return suiteError_Fail;
     }
     *outFrame = outHand;
+    BT_LOG("  done");
     return suiteError_NoError;
+}
+
+// No C++ exception may reach the host.
+template <class F>
+prSuiteError Guarded(const char* what, F&& f)
+{
+    try {
+        return f();
+    } catch (const std::exception& e) {
+        BT_LOG("%s: exception %s", what, e.what());
+    } catch (...) {
+        BT_LOG("%s: unknown exception", what);
+    }
+    return suiteError_Fail;
+}
+
+prSuiteError CreateInstance(PrGPUFilterInstance* io)
+{
+    if (!io) return suiteError_Fail;
+    return Guarded("CreateInstance", [&] { return CreateInstanceImpl(io); });
+}
+
+prSuiteError DisposeInstance(PrGPUFilterInstance* io)
+{
+    if (!io) return suiteError_NoError;
+    return Guarded("DisposeInstance", [&] { return DisposeInstanceImpl(io); });
+}
+
+prSuiteError GetFrameDependencies(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp,
+                                  csSDK_int32* ioQueryIndex, PrGPUFilterFrameDependency* out)
+{
+    if (!io) return suiteError_NotImplemented;
+    return Guarded("GetFrameDependencies", [&] { return GetFrameDependenciesImpl(io, rp, ioQueryIndex, out); });
+}
+
+prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, const PPixHand* inFrames,
+                    csSDK_size_t inFrameCount, PPixHand* outFrame)
+{
+    if (!io) return suiteError_Fail;
+    return Guarded("Render", [&] { return RenderImpl(io, rp, inFrames, inFrameCount, outFrame); });
 }
 
 }  // namespace
@@ -458,11 +547,13 @@ prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, 
 // Entry point
 // ---------------------------------------------------------------------------
 
-extern "C" DllExport prSuiteError xGPUFilterEntry(csSDK_uint32 /*inHostInterfaceVersion*/,
+extern "C" DllExport prSuiteError xGPUFilterEntry(csSDK_uint32 inHostInterfaceVersion,
                                                   csSDK_int32* ioIndex, prBool inStartup,
                                                   piSuitesPtr /*piSuites*/, PrGPUFilter* outFilter,
                                                   PrGPUFilterInfo* outFilterInfo)
 {
+    BT_LOG("xGPUFilterEntry startup=%d host interface %u index %d", static_cast<int>(inStartup),
+           static_cast<unsigned>(inHostInterfaceVersion), ioIndex ? static_cast<int>(*ioIndex) : -1);
     if (!inStartup) {
         ReleaseBackends();
         return suiteError_NoError;

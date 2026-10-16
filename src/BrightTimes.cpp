@@ -9,6 +9,7 @@
 #include "BrightTimes.h"
 #include "BrightTimesCore.h"
 #include "BrightTimesSettings.h"
+#include "BrightTimesLog.h"
 #include "gpu/BrightTimesGPU.h"
 
 #include <cmath>
@@ -499,7 +500,7 @@ PF_Err FinalizeRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*iterati
 PF_Err ForEachRow(PF_InData* in_data, A_long rows, void* ctx, RowFn fn)
 {
     SuiteScope<PF_Iterate8Suite2> iter(in_data, kPFIterate8Suite, kPFIterate8SuiteVersion2);
-    if (iter) return iter->iterate_generic(rows, ctx, fn);
+    if (iter && iter->iterate_generic) return iter->iterate_generic(rows, ctx, fn);
     for (A_long y = 0; y < rows; ++y) {
         if (const PF_Err e = fn(ctx, 0, y, rows)) return e;
     }
@@ -740,7 +741,7 @@ PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data)
         // Render in Premiere's native BGRA, 32-bit float when the sequence asks
         // for maximum depth, 8-bit otherwise.
         SuiteScope<PF_PixelFormatSuite1> pf(in_data, kPFPixelFormatSuite, kPFPixelFormatSuiteVersion1);
-        if (pf) {
+        if (pf && pf->ClearSupportedPixelFormats && pf->AddSupportedPixelFormat) {
             pf->ClearSupportedPixelFormats(in_data->effect_ref);
             pf->AddSupportedPixelFormat(in_data->effect_ref, PrPixelFormat_BGRA_4444_32f);
             pf->AddSupportedPixelFormat(in_data->effect_ref, PrPixelFormat_BGRA_4444_8u);
@@ -748,7 +749,10 @@ PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data)
         // Neighbouring frames from PF_CHECKOUT_PARAM in the same format as the output
         // (otherwise they arrive as 8-bit ARGB; the renderer handles both).
         SuiteScope<PF_UtilitySuite4> util(in_data, kPFUtilitySuite, kPFUtilitySuiteVersion4);
-        if (util) util->EffectWantsCheckedOutFramesToMatchRenderPixelFormat(in_data->effect_ref);
+        if (util && util->EffectWantsCheckedOutFramesToMatchRenderPixelFormat) {
+            util->EffectWantsCheckedOutFramesToMatchRenderPixelFormat(in_data->effect_ref);
+        }
+        BT_LOG("GlobalSetup Premiere: pixel format suite %d, utility suite %d", pf ? 1 : 0, util ? 1 : 0);
     }
     return PF_Err_NONE;
 }
@@ -918,7 +922,7 @@ public:
 
     PixKind Of(PF_EffectWorld* w) const
     {
-        if (premiere_ && pf_) {
+        if (premiere_ && pf_ && pf_->GetPixelFormat) {
             PrPixelFormat fmt = PrPixelFormat_Invalid;
             if (pf_->GetPixelFormat(w, &fmt) == PF_Err_NONE) {
                 switch (fmt) {
@@ -970,6 +974,7 @@ public:
         }
         if (!err) {
             *kind      = kinds_.Of(&params_[i].u.ld);  // query the host's own world
+            BT_LOG("  sample %d kind=%d", static_cast<int>(i), static_cast<int>(*kind));
             worlds_[i] = PlainWorld(params_[i].u.ld);
             *world     = &worlds_[i];
         }
@@ -990,6 +995,10 @@ private:
         const PF_Err err = PF_CHECKOUT_PARAM(in_data_, BT_INPUT, t, in_data_->time_step,
                                              in_data_->time_scale, &params_[i]);
         checkedOut_[i] = (err == PF_Err_NONE);
+        BT_LOG("  checkout sample %d t=%d err=%d %dx%d rowbytes=%d data=%p", static_cast<int>(i),
+               static_cast<int>(t), static_cast<int>(err), static_cast<int>(params_[i].u.ld.width),
+               static_cast<int>(params_[i].u.ld.height), static_cast<int>(params_[i].u.ld.rowbytes),
+               params_[i].u.ld.data);
         return err;
     }
     bool Empty(size_t i) const
@@ -1024,6 +1033,15 @@ PF_Err ClassicRender(PF_InData* in_data, PF_ParamDef* params[], PF_LayerDef* out
     const PixelKindQuery kinds(in_data);
     const PixKind        outKind = kinds.Of(output);
     const PixKind        curKind = kinds.Of(&params[BT_INPUT]->u.ld);
+    BT_LOG("ClassicRender t=%d step=%d scale=%d total=%d field=%d samples=%d out %dx%d rowbytes=%d kind=%d "
+           "cur %dx%d rowbytes=%d kind=%d",
+           static_cast<int>(in_data->current_time), static_cast<int>(in_data->time_step),
+           static_cast<int>(in_data->time_scale), static_cast<int>(in_data->total_time),
+           static_cast<int>(in_data->field), static_cast<int>(rd.samples.size()),
+           static_cast<int>(output->width), static_cast<int>(output->height), static_cast<int>(output->rowbytes),
+           static_cast<int>(outKind), static_cast<int>(params[BT_INPUT]->u.ld.width),
+           static_cast<int>(params[BT_INPUT]->u.ld.height), static_cast<int>(params[BT_INPUT]->u.ld.rowbytes),
+           static_cast<int>(curKind));
     PF_EffectWorld       out     = PlainWorld(*output);  // pixels are written through out.data
     PF_EffectWorld       current = PlainWorld(params[BT_INPUT]->u.ld);
     ParamFrameSource     frames(in_data, rd, hold, kinds);
@@ -1069,6 +1087,7 @@ extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutDat
                                        PF_ParamDef* params[], PF_LayerDef* output, void* extra)
 {
     PF_Err err = PF_Err_NONE;
+    BT_LOG("EffectMain cmd=%d app=%08X", static_cast<int>(cmd), in_data ? static_cast<unsigned>(in_data->appl_id) : 0u);
     try {
         switch (cmd) {
             case PF_Cmd_ABOUT:
@@ -1112,5 +1131,6 @@ extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutDat
     } catch (...) {
         err = PF_Err_INTERNAL_STRUCT_DAMAGED;
     }
+    BT_LOG("EffectMain cmd=%d -> err=%d", static_cast<int>(cmd), static_cast<int>(err));
     return err;
 }

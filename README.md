@@ -132,6 +132,18 @@ Metal включён по умолчанию, бандл универсальн�
 
 После установки: *Effect → Bright Times → Bright Times*.
 
+## Диагностика
+
+Лог включается переменной окружения `BRIGHT_TIMES_LOG` (до запуска AE / Premiere):
+
+```powershell
+setx BRIGHT_TIMES_LOG 1      # лог в %TEMP%\BrightTimes.log; выключить: setx BRIGHT_TIMES_LOG 0
+```
+
+Каждая строка сразу пишется на диск, поэтому после вылета хоста последние строки показывают,
+где это случилось. Рядом с `.aex` в `build\Release` лежат `BrightTimes.pdb` и `BrightTimes.map`
+для расшифровки адреса падения (Event Viewer → Windows Logs → Application → Application Error).
+
 ## Тесты (без After Effects)
 
 ```sh

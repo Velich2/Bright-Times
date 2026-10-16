@@ -44,7 +44,7 @@ union PF_ParamDefUnion { PF_LayerDef ld; PF_SliderDef sd; PF_FloatSliderDef fs_d
 struct PF_ParamDef { A_long id; A_long ui_flags; A_short ui_width, ui_height; A_long param_type; A_char name[32]; A_long flags; A_long unused; PF_ParamDefUnion u; };
 struct PF_InData;
 struct PF_InteractCallbacks { PF_Err (*checkout_param)(PF_ProgPtr, PF_ParamIndex, A_long, A_long, A_u_long, PF_ParamDef*); PF_Err (*checkin_param)(PF_ProgPtr, PF_ParamDef*); PF_Err (*add_param)(PF_ProgPtr, A_long, PF_ParamDef*); PF_Err (*abort)(PF_ProgPtr); };
-struct PF_InData { PF_InteractCallbacks inter; PF_ProgPtr effect_ref; A_long current_time, time_step, total_time; A_u_long time_scale; SPBasicSuite* pica_basicP; A_long appl_id; };
+struct PF_InData { PF_InteractCallbacks inter; PF_ProgPtr effect_ref; A_long current_time, time_step, total_time; A_u_long time_scale; A_long field; SPBasicSuite* pica_basicP; A_long appl_id; };
 struct PF_OutData { A_u_long my_version; A_char return_msg[256]; A_long out_flags, out_flags2, num_params; };
 #define PF_CHECKOUT_PARAM(IN, I, T, S, SC, P) ((IN)->inter.checkout_param((IN)->effect_ref, (I), (T), (S), (SC), (P)))
 #define PF_CHECKIN_PARAM(IN, P) ((IN)->inter.checkin_param((IN)->effect_ref, (P)))

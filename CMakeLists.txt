@@ -133,6 +133,11 @@ endif()
 if(WIN32)
   target_compile_definitions(BrightTimes PRIVATE MSWindows WIN32 _WINDOWS "NOMINMAX=")  # empty, as PrSDKTypes.h defines it
   set_target_properties(BrightTimes PROPERTIES SUFFIX ".aex" PREFIX "")
+  if(MSVC)
+    # Symbols (.pdb) and a .map file next to the .aex, to resolve crash offsets.
+    target_compile_options(BrightTimes PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Zi>)
+    target_link_options(BrightTimes PRIVATE /DEBUG /OPT:REF /OPT:ICF /MAP)
+  endif()
 
   set(BT_PIPL_RC "${BT_GEN_DIR}/BrightTimesPiPL.rc")
   add_custom_command(
