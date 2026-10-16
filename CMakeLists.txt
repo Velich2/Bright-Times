@@ -134,6 +134,10 @@ if(WIN32)
   target_compile_definitions(BrightTimes PRIVATE MSWindows WIN32 _WINDOWS "NOMINMAX=")  # empty, as PrSDKTypes.h defines it
   set_target_properties(BrightTimes PROPERTIES SUFFIX ".aex" PREFIX "")
   if(MSVC)
+    # Hosts may load an older msvcp140.dll than the one we build against
+    # (Premiere Pro 25 ships its own). Since VS 2022 17.10 std::mutex has a
+    # constexpr constructor that crashes in mutex::lock with an older runtime.
+    target_compile_definitions(BrightTimes PRIVATE _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
     # Symbols (.pdb) and a .map file next to the .aex, to resolve crash offsets.
     target_compile_options(BrightTimes PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Zi>)
     target_link_options(BrightTimes PRIVATE /DEBUG /OPT:REF /OPT:ICF /MAP)
