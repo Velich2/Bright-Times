@@ -40,11 +40,11 @@ struct PF_GPUDeviceSetdownExtra { PF_GPUDeviceSetdownInput* input; };
 #define kPFGPUDeviceSuiteVersion1 1
 struct PF_GPUDeviceSuite1 { PF_Err (*GetDeviceInfo)(PF_ProgPtr, A_u_long, PF_GPUDeviceInfo*); PF_Err (*GetGPUWorldData)(PF_ProgPtr, PF_EffectWorld*, void**); };
 struct PF_SliderDef { A_long value; }; struct PF_FloatSliderDef { PF_FpLong value; }; struct PF_CheckBoxDef { A_long value; }; struct PF_PopupDef { A_long value; }; struct PF_AngleDef { PF_Fixed value; }; struct PF_ColorDef { PF_Pixel value; };
-union PF_ParamDefUnion { PF_SliderDef sd; PF_FloatSliderDef fs_d; PF_CheckBoxDef bd; PF_PopupDef pd; PF_AngleDef ad; PF_ColorDef cd; };
+union PF_ParamDefUnion { PF_LayerDef ld; PF_SliderDef sd; PF_FloatSliderDef fs_d; PF_CheckBoxDef bd; PF_PopupDef pd; PF_AngleDef ad; PF_ColorDef cd; };
 struct PF_ParamDef { A_long id; A_long ui_flags; A_short ui_width, ui_height; A_long param_type; A_char name[32]; A_long flags; A_long unused; PF_ParamDefUnion u; };
 struct PF_InData;
 struct PF_InteractCallbacks { PF_Err (*checkout_param)(PF_ProgPtr, PF_ParamIndex, A_long, A_long, A_u_long, PF_ParamDef*); PF_Err (*checkin_param)(PF_ProgPtr, PF_ParamDef*); PF_Err (*add_param)(PF_ProgPtr, A_long, PF_ParamDef*); PF_Err (*abort)(PF_ProgPtr); };
-struct PF_InData { PF_InteractCallbacks inter; PF_ProgPtr effect_ref; A_long current_time, time_step, total_time; A_u_long time_scale; SPBasicSuite* pica_basicP; };
+struct PF_InData { PF_InteractCallbacks inter; PF_ProgPtr effect_ref; A_long current_time, time_step, total_time; A_u_long time_scale; SPBasicSuite* pica_basicP; A_long appl_id; };
 struct PF_OutData { A_u_long my_version; A_char return_msg[256]; A_long out_flags, out_flags2, num_params; };
 #define PF_CHECKOUT_PARAM(IN, I, T, S, SC, P) ((IN)->inter.checkout_param((IN)->effect_ref, (I), (T), (S), (SC), (P)))
 #define PF_CHECKIN_PARAM(IN, P) ((IN)->inter.checkin_param((IN)->effect_ref, (P)))
@@ -54,7 +54,8 @@ struct PF_OutData { A_u_long my_version; A_char return_msg[256]; A_long out_flag
 #define ERR2(F) do { if (((err2 = (F)) != PF_Err_NONE) && !err) err = err2; } while (0)
 #define PF_VERSION(a,b,c,d,e) (((a)<<19)|((b)<<15)|((c)<<11)|((d)<<9)|(e))
 enum { PF_Stage_DEVELOP = 0 };
-enum { PF_Cmd_ABOUT=0, PF_Cmd_GLOBAL_SETUP, PF_Cmd_PARAMS_SETUP=4, PF_Cmd_USER_CHANGED_PARAM=13, PF_Cmd_UPDATE_PARAMS_UI=14, PF_Cmd_SMART_PRE_RENDER=23, PF_Cmd_SMART_RENDER=24, PF_Cmd_SMART_RENDER_GPU=31 };
+enum { PF_WorldFlag_DEEP = 1, PF_WorldFlag_WRITEABLE = 2 };
+enum { PF_Cmd_ABOUT=0, PF_Cmd_GLOBAL_SETUP, PF_Cmd_PARAMS_SETUP=4, PF_Cmd_RENDER=11, PF_Cmd_USER_CHANGED_PARAM=13, PF_Cmd_UPDATE_PARAMS_UI=14, PF_Cmd_SMART_PRE_RENDER=23, PF_Cmd_SMART_RENDER=24, PF_Cmd_SMART_RENDER_GPU=31 };
 enum { PF_OutFlag_WIDE_TIME_INPUT=2, PF_OutFlag_DEEP_COLOR_AWARE=33554432, PF_OutFlag_SEND_UPDATE_PARAMS_UI=67108864 };
 enum { PF_OutFlag2_SUPPORTS_SMART_RENDER=1024, PF_OutFlag2_FLOAT_COLOR_AWARE=4096, PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT=131072, PF_OutFlag2_SUPPORTS_THREADED_RENDERING=134217728 };
 enum { PF_PUI_DISABLED = 32 }; enum { PF_ParamFlag_SUPERVISE = 64 }; enum { PF_ValueDisplayFlag_NONE=0, PF_ValueDisplayFlag_PERCENT=1 };

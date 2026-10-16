@@ -468,34 +468,76 @@ PF_Err FinalizeRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*iterati
     return PF_Err_NONE;
 }
 
+using RowFn = PF_Err (*)(void*, A_long, A_long, A_long);
+
+// Runs fn for every row: multi-threaded through the Iterate8 suite, or serially
+// when the host does not provide it (some suites are missing in Premiere Pro).
+PF_Err ForEachRow(PF_InData* in_data, A_long rows, void* ctx, RowFn fn)
+{
+    SuiteScope<PF_Iterate8Suite2> iter(in_data, kPFIterate8Suite, kPFIterate8SuiteVersion2);
+    if (iter) return iter->iterate_generic(rows, ctx, fn);
+    for (A_long y = 0; y < rows; ++y) {
+        if (const PF_Err e = fn(ctx, 0, y, rows)) return e;
+    }
+    return PF_Err_NONE;
+}
+
+// Supplies the sample frames to the CPU renderer.
+class FrameSource {
+public:
+    virtual ~FrameSource() = default;
+    virtual PF_Err Get(size_t i, const PF_EffectWorld** world) = 0;
+    virtual PF_Err Release(size_t i) = 0;
+};
+
+// After Effects (SmartFX): frames checked out in PreRender.
+class SmartFrameSource : public FrameSource {
+public:
+    SmartFrameSource(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderData& rd)
+        : in_data_(in_data), extra_(extra), rd_(rd) {}
+    PF_Err Get(size_t i, const PF_EffectWorld** world) override
+    {
+        PF_EffectWorld* w = nullptr;
+        const PF_Err    e = extra_->cb->checkout_layer_pixels(in_data_->effect_ref, rd_.checkoutIds[i], &w);
+        *world = w;
+        return e;
+    }
+    PF_Err Release(size_t i) override
+    {
+        return extra_->cb->checkin_layer_pixels(in_data_->effect_ref, rd_.checkoutIds[i]);
+    }
+
+private:
+    PF_InData*           in_data_;
+    PF_SmartRenderExtra* extra_;
+    const RenderData&    rd_;
+};
+
 template <typename P>
-PF_Err RenderWorld(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderData& rd,
+PF_Err RenderWorld(PF_InData* in_data, FrameSource& frames, const RenderData& rd,
                    PF_EffectWorld* out, const PF_EffectWorld* current)
 {
     PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
     if (out->width <= 0 || out->height <= 0) return err;
-
-    SuiteScope<PF_Iterate8Suite2> iter(in_data, kPFIterate8Suite, kPFIterate8SuiteVersion2);
-    if (!iter) return PF_Err_BAD_CALLBACK_PARAM;
 
     const bt::Settings& s = rd.settings;
     std::vector<float>  acc(4 * static_cast<size_t>(out->width) * out->height);
     bt::InitAccumRow(s.blendMode, acc.data(), out->width * out->height);
 
     for (size_t i = 0; i < rd.samples.size() && !err; ++i) {
-        PF_EffectWorld* src = nullptr;
-        ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, rd.checkoutIds[i], &src));
+        const PF_EffectWorld* src = nullptr;
+        ERR(frames.Get(i, &src));
         if (!err && src && src->data) {
             AccumulateCtx ctx{out, src, &rd.samples[i], s.blendMode, s.tintMode, acc.data()};
-            ERR(iter->iterate_generic(out->height, &ctx, AccumulateRowFn<P>));
+            ERR(ForEachRow(in_data, out->height, &ctx, AccumulateRowFn<P>));
         }
-        ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, rd.checkoutIds[i]));
+        ERR2(frames.Release(i));
         ERR(PF_ABORT(in_data));
     }
 
     if (!err) {
         FinalizeCtx ctx{out, current, s.blendMode, s.mix, s.intensity, acc.data()};
-        ERR(iter->iterate_generic(out->height, &ctx, FinalizeRowFn<P>));
+        ERR(ForEachRow(in_data, out->height, &ctx, FinalizeRowFn<P>));
     }
     return err;
 }
@@ -645,7 +687,7 @@ PF_Err About(PF_OutData* out_data)
     return PF_Err_NONE;
 }
 
-PF_Err GlobalSetup(PF_OutData* out_data)
+PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data)
 {
     out_data->my_version = PF_VERSION(BT_MAJOR_VERSION, BT_MINOR_VERSION, BT_BUG_VERSION,
                                       BT_STAGE_VERSION, BT_BUILD_VERSION);
@@ -659,6 +701,13 @@ PF_Err GlobalSetup(PF_OutData* out_data)
                            PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT |
                            PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
                            PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+
+    // Premiere Pro supports neither SmartFX nor the After Effects GPU path: it
+    // uses the classic PF_Cmd_RENDER (ClassicRender) with 8-bit frames.
+    if (in_data->appl_id == 0x50724D72 /* 'PrMr' */) {
+        out_data->out_flags  = PF_OutFlag_WIDE_TIME_INPUT | PF_OutFlag_SEND_UPDATE_PARAMS_UI;
+        out_data->out_flags2 = 0;
+    }
     return PF_Err_NONE;
 }
 
@@ -786,10 +835,11 @@ PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra, bool gpu)
             if (!ws) err = PF_Err_BAD_CALLBACK_PARAM;
             ERR(ws->PF_GetPixelFormat(out, &fmt));
             if (!err) {
+                SmartFrameSource frames(in_data, extra, *rd);
                 switch (fmt) {
-                    case PF_PixelFormat_ARGB128: err = RenderWorld<PF_PixelFloat>(in_data, extra, *rd, out, current); break;
-                    case PF_PixelFormat_ARGB64:  err = RenderWorld<PF_Pixel16>(in_data, extra, *rd, out, current); break;
-                    case PF_PixelFormat_ARGB32:  err = RenderWorld<PF_Pixel8>(in_data, extra, *rd, out, current); break;
+                    case PF_PixelFormat_ARGB128: err = RenderWorld<PF_PixelFloat>(in_data, frames, *rd, out, current); break;
+                    case PF_PixelFormat_ARGB64:  err = RenderWorld<PF_Pixel16>(in_data, frames, *rd, out, current); break;
+                    case PF_PixelFormat_ARGB32:  err = RenderWorld<PF_Pixel8>(in_data, frames, *rd, out, current); break;
                     default:                     err = PF_Err_BAD_CALLBACK_PARAM; break;
                 }
             }
@@ -798,6 +848,103 @@ PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra, bool gpu)
 
     ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, kCurrentFrameCheckoutId));
     return err;
+}
+
+// ---------------------------------------------------------------------------
+// Classic (non-SmartFX) render: Premiere Pro does not support SmartFX and sends
+// PF_Cmd_RENDER. Neighbouring frames come from PF_CHECKOUT_PARAM on the layer.
+// ---------------------------------------------------------------------------
+
+// Copy of a world with the SmartFX-only origin cleared (unused in classic render).
+PF_EffectWorld PlainWorld(const PF_EffectWorld& w)
+{
+    PF_EffectWorld c = w;
+    c.origin_x = 0;
+    c.origin_y = 0;
+    return c;
+}
+
+class ParamFrameSource : public FrameSource {
+public:
+    ParamFrameSource(PF_InData* in_data, const RenderData& rd, bool holdEdges)
+        : in_data_(in_data), rd_(rd), hold_(holdEdges),
+          params_(rd.samples.size()), worlds_(rd.samples.size()), checkedOut_(rd.samples.size(), false) {}
+
+    PF_Err Get(size_t i, const PF_EffectWorld** world) override
+    {
+        *world = nullptr;
+        const A_long step = in_data_->time_step;
+        A_long       t    = in_data_->current_time + rd_.samples[i].frameOffset * step;
+        // Hold First/Last Frame: stay inside the clip.
+        if (hold_ && step > 0 && in_data_->total_time > 0) {
+            t = std::max<A_long>(0, std::min<A_long>(t, in_data_->total_time - step));
+        }
+        PF_Err err = Checkout(i, t);
+        if (!err && hold_ && Empty(i) && t != in_data_->current_time) {
+            // Still nothing there (e.g. trimmed clip): use the current frame.
+            err = Release(i);
+            if (!err) err = Checkout(i, in_data_->current_time);
+        }
+        if (!err) {
+            worlds_[i] = PlainWorld(params_[i].u.ld);
+            *world     = &worlds_[i];
+        }
+        return err;
+    }
+
+    PF_Err Release(size_t i) override
+    {
+        if (!checkedOut_[i]) return PF_Err_NONE;
+        checkedOut_[i] = false;
+        return PF_CHECKIN_PARAM(in_data_, &params_[i]);
+    }
+
+private:
+    PF_Err Checkout(size_t i, A_long t)
+    {
+        AEFX_CLR_STRUCT(params_[i]);
+        const PF_Err err = PF_CHECKOUT_PARAM(in_data_, BT_INPUT, t, in_data_->time_step,
+                                             in_data_->time_scale, &params_[i]);
+        checkedOut_[i] = (err == PF_Err_NONE);
+        return err;
+    }
+    bool Empty(size_t i) const
+    {
+        const PF_LayerDef& l = params_[i].u.ld;
+        return !l.data || l.width <= 0 || l.height <= 0;
+    }
+
+    PF_InData*                  in_data_;
+    const RenderData&           rd_;
+    bool                        hold_;
+    std::vector<PF_ParamDef>    params_;
+    std::vector<PF_EffectWorld> worlds_;
+    std::vector<bool>           checkedOut_;
+};
+
+PF_Err ClassicRender(PF_InData* in_data, PF_ParamDef* params[], PF_LayerDef* output)
+{
+    PF_Err     err  = PF_Err_NONE;
+    bool       hold = true;
+    RenderData rd;
+    ERR(ReadSettings(in_data, rd.settings));
+    if (!err) {
+        ParamReader r(in_data);
+        hold = r.Popup(BT_EDGE_MODE) == BT_EDGE_HOLD;
+        ERR(r.err());
+    }
+    if (err) return err;
+    rd.samples = bt::BuildSamples(rd.settings);
+
+    PF_EffectWorld   out     = PlainWorld(*output);  // pixels are written through out.data
+    PF_EffectWorld   current = PlainWorld(params[BT_INPUT]->u.ld);
+    ParamFrameSource frames(in_data, rd, hold);
+
+    // Classic render gets 8-bit (or AE 16-bit) ARGB worlds.
+    if (output->world_flags & PF_WorldFlag_DEEP) {
+        return RenderWorld<PF_Pixel16>(in_data, frames, rd, &out, &current);
+    }
+    return RenderWorld<PF_Pixel8>(in_data, frames, rd, &out, &current);
 }
 
 }  // namespace
@@ -829,7 +976,7 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
 }
 
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutData* out_data,
-                                       PF_ParamDef* params[], PF_LayerDef* /*output*/, void* extra)
+                                       PF_ParamDef* params[], PF_LayerDef* output, void* extra)
 {
     PF_Err err = PF_Err_NONE;
     try {
@@ -838,7 +985,7 @@ extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutDat
                 err = About(out_data);
                 break;
             case PF_Cmd_GLOBAL_SETUP:
-                err = GlobalSetup(out_data);
+                err = GlobalSetup(in_data, out_data);
                 break;
             case PF_Cmd_PARAMS_SETUP:
                 err = ParamsSetup(in_data, out_data);
@@ -849,6 +996,9 @@ extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutDat
                 break;
             case PF_Cmd_SMART_PRE_RENDER:
                 err = PreRender(in_data, static_cast<PF_PreRenderExtra*>(extra));
+                break;
+            case PF_Cmd_RENDER:  // hosts without SmartFX, e.g. Premiere Pro
+                err = ClassicRender(in_data, params, output);
                 break;
             case PF_Cmd_SMART_RENDER:
                 err = SmartRender(in_data, static_cast<PF_SmartRenderExtra*>(extra), false);

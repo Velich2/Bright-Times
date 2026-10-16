@@ -48,8 +48,17 @@ static Frame* renderFrame(A_long t) {  // t in frames (time_step = 1)
   return f;
 }
 static PF_Err add_param(PF_ProgPtr, A_long, PF_ParamDef* d) { g_params.push_back(*d); return 0; }
-static PF_Err checkout_param(PF_ProgPtr, PF_ParamIndex i, A_long, A_long, A_u_long, PF_ParamDef* p) { if (i<=0 || i>(int)g_params.size()) return PF_Err_BAD_CALLBACK_PARAM; *p = g_params[i-1]; return 0; }
-static PF_Err checkin_param(PF_ProgPtr, PF_ParamDef*) { return 0; }
+// Index 0 is the layer itself (classic render / Premiere): a frame at time t.
+static constexpr A_long kLayerParamType = 999;
+static std::map<void*, Frame*> g_paramFrames;
+static Frame* renderFrame(A_long t);
+static PF_Err checkout_param(PF_ProgPtr, PF_ParamIndex i, A_long t, A_long, A_u_long, PF_ParamDef* p) {
+  if (i == 0) { Frame* f = renderFrame(t); AEFX_CLR_STRUCT(*p); p->param_type = kLayerParamType; p->u.ld = f->w; g_paramFrames[f->w.data] = f; return 0; }
+  if (i<0 || i>(int)g_params.size()) return PF_Err_BAD_CALLBACK_PARAM;
+  *p = g_params[i-1]; return 0; }
+static PF_Err checkin_param(PF_ProgPtr, PF_ParamDef* p) {
+  if (p->param_type == kLayerParamType) { auto it = g_paramFrames.find(p->u.ld.data); if (it == g_paramFrames.end()) return PF_Err_BAD_CALLBACK_PARAM; delete it->second; g_paramFrames.erase(it); }
+  return 0; }
 static PF_Err abort_cb(PF_ProgPtr) { return 0; }
 static PF_Err checkout_layer(PF_ProgPtr, PF_ParamIndex idx, A_long id, const PF_RenderRequest*, A_long t, A_long, A_u_long, PF_CheckoutResult* r) {
   if (idx != 0) return PF_Err_BAD_CALLBACK_PARAM;
@@ -253,6 +262,47 @@ int main(int argc, char** argv) {
     if (!ok || !origOk || !effectDiffers) return 1;
     g_params[BT_BLEND_ORIGINAL-1].u.fs_d.value = 0;
     g_params[BT_BLEND_MODE-1].u.pd.value = 1;
+  }
+  // Premiere Pro: no SmartFX. GlobalSetup must drop the SmartFX/GPU flags and
+  // PF_Cmd_RENDER (frames via PF_CHECKOUT_PARAM) must match the SmartFX result.
+  {
+    PF_InData pin_data = in; pin_data.appl_id = 0x50724D72;  // 'PrMr'
+    PF_OutData pout{};
+    EffectMain(PF_Cmd_GLOBAL_SETUP, &pin_data, &pout, nullptr, nullptr, nullptr);
+    const bool flagsOk = !(pout.out_flags2 & PF_OutFlag2_SUPPORTS_SMART_RENDER) && !(pout.out_flags2 & PF_OutFlag2_SUPPORTS_GPU_RENDER_F32);
+
+    g_fmt = PF_PixelFormat_ARGB32;
+    g_params[BT_FRAMES_BACKWARD-1].u.fs_d.value = 3; g_params[BT_FRAMES_FORWARD-1].u.fs_d.value = 2;
+    bool same = true;
+    for (int bm = 1; bm <= 5; ++bm) {
+      g_params[BT_BLEND_MODE-1].u.pd.value = bm;
+      // SmartFX reference
+      g_checkTime.clear();
+      PF_PreRenderInput prin{}; PF_PreRenderOutput prout{}; PF_PreRenderCallbacks pcb{checkout_layer};
+      PF_PreRenderExtra pex{&prin, &prout, &pcb};
+      EffectMain(PF_Cmd_SMART_PRE_RENDER, &in, &out, nullptr, nullptr, &pex);
+      Frame* smart = makeWorld(); g_output = smart;
+      PF_SmartRenderInput sin{}; sin.pre_render_data = prout.pre_render_data;
+      PF_SmartRenderCallbacks scb{checkout_layer_pixels, checkin_layer_pixels, checkout_output};
+      PF_SmartRenderExtra sex{&sin, &scb}; g_inputCheckouts = 0;
+      EffectMain(PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex);
+      prout.delete_pre_render_data_func(prout.pre_render_data);
+      // Classic render
+      Frame* cur = renderFrame(in.current_time);
+      Frame* classic = makeWorld();
+      std::vector<PF_ParamDef*> pp(out.num_params); PF_ParamDef layer{}; layer.u.ld = cur->w; pp[0] = &layer;
+      for (int k = 1; k < out.num_params; ++k) pp[k] = &g_params[k-1];
+      const PF_Err e = EffectMain(PF_Cmd_RENDER, &pin_data, &pout, pp.data(), &classic->w, nullptr);
+      if (e || !g_paramFrames.empty()) same = false;
+      for (int y = 0; y < H && same; ++y)
+        if (std::memcmp((char*)smart->w.data + y*smart->w.rowbytes, (char*)classic->w.data + y*classic->w.rowbytes, W*4) != 0) same = false;
+      if (!same) std::printf("  classic render differs (blend %d, err %d, leaked %zu)\n", bm, e, g_paramFrames.size());
+      delete smart; delete classic; delete cur;
+    }
+    g_params[BT_FRAMES_BACKWARD-1].u.fs_d.value = 4; g_params[BT_FRAMES_FORWARD-1].u.fs_d.value = 4;
+    g_params[BT_BLEND_MODE-1].u.pd.value = 1;
+    std::printf("premiere: flags %s, classic render == smart render %s\n", flagsOk ? "OK" : "FAIL", same ? "OK" : "FAIL");
+    if (!flagsOk || !same) return 1;
   }
   std::printf("checkout times:"); for (auto& kv : g_checkTime) std::printf(" %d@%d", kv.first, kv.second); std::printf("\n");
   std::printf("ALL OK\n");

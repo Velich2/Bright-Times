@@ -59,6 +59,9 @@ tools/preview.cpp          офлайн-превью алгоритма
 
 * **SmartFX + Multi-Frame Rendering**, 8 / 16 / 32 bpc на CPU.
 * **GPU (32-bit float)**: CUDA, OpenCL, Metal — AE сам выбирает, если в *Project Settings → Video Rendering and Effects* стоит Mercury GPU Acceleration. Если фреймворк не поддержан сборкой (например, DirectX), AE автоматически рендерит на CPU.
+* **Premiere Pro**: Premiere не поддерживает SmartFX и GPU-путь After Effects, поэтому там
+  работает классический рендер (`PF_Cmd_RENDER`, соседние кадры через `PF_CHECKOUT_PARAM`):
+  та же математика, 8 бит, на CPU. Плагин ставится в ту же папку MediaCore и появляется в обеих программах.
 * Время: `PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT` — AE сам отслеживает зависимость от соседних кадров для кэша.
 * Альфа: прозрачность учитывается корректно (накопление в premultiplied, вывод straight).
 
