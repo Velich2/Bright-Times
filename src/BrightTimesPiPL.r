@@ -66,7 +66,7 @@ resource 'PiPL' (16000) {
 			8
 		},
 		AE_Effect_Support_URL {
-			"https://github.com/velich2/bright-times"
+			"https://github.com/Velich2/Bright-Times"
 		}
 	}
 };

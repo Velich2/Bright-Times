@@ -8,6 +8,7 @@
 #include "entry.h"
 #include "AE_Effect.h"
 #include "AE_PluginData.h"
+#include "AE_EffectVers.h"
 #include "AE_EffectCB.h"
 #include "AE_EffectCBSuites.h"
 #include "AE_EffectSuites.h"
@@ -29,6 +30,9 @@
 
 // Must match AE_Reserved_Info in BrightTimesPiPL.r.
 #define BT_RESERVED_INFO 8
+// PiPL kind 'eFKT' (AEEffect) as passed to the plug-in data callback.
+#define BT_PLUGIN_KIND_EFFECT 0x65464B54
+#define BT_SUPPORT_URL "https://github.com/Velich2/Bright-Times"
 
 // Parameter indices. Topic start/end entries are parameters too.
 enum {

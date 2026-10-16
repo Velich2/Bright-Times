@@ -731,12 +731,20 @@ extern "C" DllExport PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
                                                      const char*      /*inHostName*/,
                                                      const char*      /*inHostVersion*/)
 {
-    PF_Err result = PF_Err_INVALID_CALLBACK;
-    result = PF_REGISTER_EFFECT_EXT2(inPtr, inPluginDataCallBackPtr,
-                                     BT_NAME, BT_MATCH_NAME, BT_CATEGORY,
-                                     BT_RESERVED_INFO, "EffectMain",
-                                     "https://github.com/velich2/bright-times");
-    return result;
+    if (!inPluginDataCallBackPtr) return PF_Err_INVALID_CALLBACK;
+    // Same call PF_REGISTER_EFFECT_EXT2 expands to; done directly because the
+    // macro's location differs between SDK releases (not in AE_PluginData.h in 26.5).
+    // Values must match BrightTimesPiPL.r.
+    return (*inPluginDataCallBackPtr)(inPtr,
+                                      reinterpret_cast<const A_u_char*>(BT_NAME),
+                                      reinterpret_cast<const A_u_char*>(BT_MATCH_NAME),
+                                      reinterpret_cast<const A_u_char*>(BT_CATEGORY),
+                                      reinterpret_cast<const A_u_char*>("EffectMain"),
+                                      BT_PLUGIN_KIND_EFFECT,
+                                      PF_PLUG_IN_VERSION,
+                                      PF_PLUG_IN_SUBVERS,
+                                      BT_RESERVED_INFO,
+                                      reinterpret_cast<const A_u_char*>(BT_SUPPORT_URL));
 }
 
 extern "C" DllExport PF_Err EffectMain(PF_Cmd cmd, PF_InData* in_data, PF_OutData* out_data,

@@ -46,32 +46,36 @@ foreach ($f in $files) {
     if (Test-Path (Join-Path $examples $f)) { Good $f } else { Bad $f }
 }
 
+# API used by the plug-in. Searched in every SDK header (declarations move
+# between files across SDK releases); the file where each one lives is shown.
 $symbols = @(
-    @("Headers\AE_PluginData.h",       "PF_REGISTER_EFFECT_EXT2"),
-    @("Headers\AE_Effect.h",           "PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT"),
-    @("Headers\AE_Effect.h",           "PF_OutFlag2_SUPPORTS_GPU_RENDER_F32"),
-    @("Headers\AE_Effect.h",           "PF_OutFlag2_SUPPORTS_THREADED_RENDERING"),
-    @("Headers\AE_EffectGPUSuites.h",  "PF_GPUDeviceSuite1"),
-    @("Headers\AE_EffectPixelFormat.h","PF_PixelFormat_GPU_BGRA128"),
-    @("Util\Param_Utils.h",            "PF_ADD_POPUPX"),
-    @("Util\Param_Utils.h",            "PF_ADD_FLOAT_SLIDERX"),
-    @("Util\Param_Utils.h",            "PF_ADD_CHECKBOXX")
+    "PF_PluginDataCB2",
+    "PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT",
+    "PF_OutFlag2_SUPPORTS_GPU_RENDER_F32",
+    "PF_OutFlag2_SUPPORTS_THREADED_RENDERING",
+    "PF_GPUDeviceSuite1",
+    "PF_PixelFormat_GPU_BGRA128",
+    "PF_ADD_POPUPX",
+    "PF_ADD_FLOAT_SLIDERX",
+    "PF_ADD_CHECKBOXX"
 )
-foreach ($s in $symbols) {
-    $path = Join-Path $examples $s[0]
-    if ((Test-Path $path) -and (Select-String -Path $path -Pattern $s[1] -SimpleMatch -Quiet)) {
-        Good "$($s[1])"
-    } else {
-        Bad "$($s[1]) (expected in $($s[0]))"
-    }
+$headers = @(Get-ChildItem -Path (Join-Path $examples "Headers"), (Join-Path $examples "Util") -Recurse -Filter "*.h" -ErrorAction SilentlyContinue)
+foreach ($sym in $symbols) {
+    $hit = $headers | Select-String -Pattern $sym -SimpleMatch -CaseSensitive -List | Select-Object -First 1
+    if ($hit) { Good "$sym  ($($hit.Path.Substring($examples.Length + 1)))" } else { Bad "$sym (not found in SDK headers)" }
 }
+# Informational: optional registration macro (the plug-in does not need it).
+$reg = $headers | Select-String -Pattern "PF_REGISTER_EFFECT_EXT2" -SimpleMatch -CaseSensitive -List | Select-Object -First 1
+if ($reg) { Write-Host "  [INFO]    PF_REGISTER_EFFECT_EXT2 in $($reg.Path.Substring($examples.Length + 1))" }
+else      { Write-Host "  [INFO]    PF_REGISTER_EFFECT_EXT2 not in this SDK - not needed, the plug-in registers directly" }
 $ver = Select-String -Path (Join-Path $examples "Headers\AE_Effect.h") -Pattern "#define\s+PF_PLUG_IN_(VERSION|SUBVERS)\s+(\d+)" |
        ForEach-Object { $_.Matches[0].Groups[2].Value }
 if ($ver) { Write-Host "  API version: $($ver -join '.')" }
 
 Write-Host "`n== Build tools ==" -ForegroundColor Cyan
 $cmake = Get-Command cmake -ErrorAction SilentlyContinue
-if ($cmake) { Good ("cmake: " + (& cmake --version | Select-Object -First 1)) } else { Bad "cmake (install CMake 3.21+ or use the one bundled with Visual Studio)" }
+if ($cmake) { Good ("cmake: " + (& cmake --version | Select-Object -First 1)) }
+else { Bad "cmake not in PATH (run from 'Developer PowerShell for VS 2022', or: winget install Kitware.CMake)" }
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (Test-Path $vswhere) {
@@ -85,11 +89,8 @@ if (Test-Path $vswhere) {
 $nvcc = Get-Command nvcc -ErrorAction SilentlyContinue
 if ($nvcc) { Good "CUDA Toolkit (nvcc) - build with -DBT_ENABLE_CUDA=ON" } else { Warn "CUDA Toolkit not found - CUDA backend off (OpenCL still works on NVIDIA)" }
 
-$clHeader = $null
-foreach ($root in @($env:CUDA_PATH, $env:OCL_ROOT, $env:INTELOCLSDKROOT) | Where-Object { $_ }) {
-    if (Test-Path (Join-Path $root "include\CL\cl.h")) { $clHeader = $root; break }
-}
-if ($clHeader) { Good "OpenCL headers/lib: $clHeader" } else { Warn "OpenCL SDK not found (CUDA Toolkit or Khronos OpenCL-SDK). Without it build with -DBT_ENABLE_OPENCL=OFF" }
+# OpenCL needs no SDK: the plug-in loads OpenCL.dll from the GPU driver at runtime.
+if (Test-Path "$env:SystemRoot\System32\OpenCL.dll") { Good "OpenCL runtime (OpenCL.dll from the GPU driver)" } else { Warn "OpenCL.dll not found - OpenCL GPU path unavailable on this machine (CPU still works)" }
 
 Write-Host ""
 if ($ok) {

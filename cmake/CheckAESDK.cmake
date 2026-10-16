@@ -50,30 +50,34 @@ foreach(f IN LISTS _bt_required_files)
   endif()
 endforeach()
 
-# API used by the plug-in: (file, symbol, minimum SDK that has it)
+# API used by the plug-in: "symbol|minimum SDK". Searched in every SDK header,
+# since declarations move between files across SDK releases.
 set(_bt_required_symbols
-  "Headers/AE_PluginData.h|PF_REGISTER_EFFECT_EXT2|AE 2022"
-  "Headers/AE_Effect.h|PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT|CS5.5"
-  "Headers/AE_Effect.h|PF_OutFlag2_SUPPORTS_GPU_RENDER_F32|CC 2015"
-  "Headers/AE_Effect.h|PF_OutFlag2_SUPPORTS_THREADED_RENDERING|AE 2022"
-  "Headers/AE_EffectGPUSuites.h|PF_GPUDeviceSuite1|CC 2015"
-  "Headers/AE_EffectPixelFormat.h|PF_PixelFormat_GPU_BGRA128|CC 2015"
-  "Util/Param_Utils.h|PF_ADD_POPUPX|-"
-  "Util/Param_Utils.h|PF_ADD_FLOAT_SLIDERX|-"
-  "Util/Param_Utils.h|PF_ADD_CHECKBOXX|-")
+  "PF_PluginDataCB2|AE 2022"
+  "PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT|CS5.5"
+  "PF_OutFlag2_SUPPORTS_GPU_RENDER_F32|CC 2015"
+  "PF_OutFlag2_SUPPORTS_THREADED_RENDERING|AE 2022"
+  "PF_GPUDeviceSuite1|CC 2015"
+  "PF_PixelFormat_GPU_BGRA128|CC 2015"
+  "PF_ADD_POPUPX|-"
+  "PF_ADD_FLOAT_SLIDERX|-"
+  "PF_ADD_CHECKBOXX|-")
+file(GLOB _bt_headers "${AE_EX}/Headers/*.h" "${AE_EX}/Headers/SP/*.h" "${AE_EX}/Util/*.h")
+set(_bt_header_text "")
+foreach(h IN LISTS _bt_headers)
+  file(READ "${h}" _t)
+  string(APPEND _bt_header_text "${_t}")
+endforeach()
 foreach(entry IN LISTS _bt_required_symbols)
   string(REPLACE "|" ";" parts "${entry}")
-  list(GET parts 0 f)
-  list(GET parts 1 sym)
-  list(GET parts 2 since)
-  if(EXISTS "${AE_EX}/${f}")
-    file(STRINGS "${AE_EX}/${f}" hits REGEX "${sym}")
-    if(NOT hits)
-      if(since STREQUAL "-")
-        string(APPEND _bt_problems "  ${sym} not found in Examples/${f}\n")
-      else()
-        string(APPEND _bt_problems "  ${sym} not found in Examples/${f} (needs SDK ${since} or newer)\n")
-      endif()
+  list(GET parts 0 sym)
+  list(GET parts 1 since)
+  string(FIND "${_bt_header_text}" "${sym}" pos)
+  if(pos EQUAL -1)
+    if(since STREQUAL "-")
+      string(APPEND _bt_problems "  ${sym} not found in the SDK headers\n")
+    else()
+      string(APPEND _bt_problems "  ${sym} not found in the SDK headers (needs SDK ${since} or newer)\n")
     endif()
   endif()
 endforeach()

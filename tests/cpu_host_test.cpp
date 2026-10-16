@@ -64,10 +64,26 @@ static SPErr acq(const char* n, int32_t, const void** s) { ++g_acquired; std::st
   if (sn == kPFIterate8Suite) *s = &g_iter; else if (sn == kPFWorldSuite) *s = &g_world; else if (sn == kPFParamUtilsSuite) *s = &g_pu; else return 1; return 0; }
 static SPErr rel(const char*, int32_t) { --g_acquired; return 0; }
 
+// Captures what PluginDataEntryFunction2 registers (must match BrightTimesPiPL.r).
+static std::string g_regName, g_regMatch, g_regCategory, g_regEntry;
+static A_long g_regKind, g_regMajor, g_regMinor, g_regReserved;
+static PF_Err register_cb(PF_PluginDataPtr, const A_u_char* name, const A_u_char* match, const A_u_char* cat,
+                          const A_u_char* entry, A_long kind, A_long major, A_long minor, A_long reserved, const A_u_char*) {
+  g_regName = (const char*)name; g_regMatch = (const char*)match; g_regCategory = (const char*)cat; g_regEntry = (const char*)entry;
+  g_regKind = kind; g_regMajor = major; g_regMinor = minor; g_regReserved = reserved;
+  return 0;
+}
+extern "C" PF_Err PluginDataEntryFunction2(PF_PluginDataPtr, PF_PluginDataCB2, SPBasicSuite*, const char*, const char*);
+
 int main(int argc, char** argv) {
   SPBasicSuite basic{acq, rel};
   PF_InData in{}; in.inter = {checkout_param, checkin_param, add_param, abort_cb}; in.time_step = 1; in.time_scale = 24; in.current_time = 5; in.pica_basicP = &basic;
   PF_OutData out{};
+  if (PluginDataEntryFunction2(nullptr, register_cb, nullptr, "AE", "26.5") != 0 ||
+      g_regName != "Bright Times" || g_regMatch != "DVLN BrightTimes" || g_regCategory != "Time" ||
+      g_regEntry != "EffectMain" || g_regKind != 0x65464B54 || g_regMajor != PF_PLUG_IN_VERSION ||
+      g_regMinor != PF_PLUG_IN_SUBVERS || g_regReserved != 8) { std::printf("FAIL: plug-in registration\n"); return 1; }
+  std::printf("registration: OK\n");
   PF_Err e = EffectMain(PF_Cmd_GLOBAL_SETUP, &in, &out, nullptr, nullptr, nullptr); std::printf("global %d flags %x %x ver %u\n", e, out.out_flags, out.out_flags2, out.my_version);
   e = EffectMain(PF_Cmd_PARAMS_SETUP, &in, &out, nullptr, nullptr, nullptr); std::printf("params %d num %d added %zu\n", e, out.num_params, g_params.size());
   if ((int)g_params.size() + 1 != out.num_params) { std::printf("PARAM COUNT MISMATCH\n"); return 1; }

@@ -78,8 +78,9 @@ struct PF_Iterate8Suite2 { PF_Err (*iterate_generic)(A_long, void*, PF_Err (*)(v
 #define kPFParamUtilsSuite "PF Param Utils Suite"
 #define kPFParamUtilsSuiteVersion3 3
 struct PF_ParamUtilsSuite3 { PF_Err (*PF_UpdateParamUI)(PF_ProgPtr, PF_ParamIndex, const PF_ParamDef*); };
+#define PF_PLUG_IN_VERSION 13
+#define PF_PLUG_IN_SUBVERS 29
 typedef PF_Err (*PF_PluginDataCB2)(PF_PluginDataPtr, const A_u_char*, const A_u_char*, const A_u_char*, const A_u_char*, A_long, A_long, A_long, A_long, const A_u_char*);
-#define PF_REGISTER_EFFECT_EXT2(P, CB, N, M, C, R, E, U) (*(CB))((P), (const A_u_char*)(N), (const A_u_char*)(M), (const A_u_char*)(C), (const A_u_char*)(E), 0x65464B54 /* 'eFKT' */, 13, 28, (R), (const A_u_char*)(U))
 #define PF_ADD_PARAM(IN, I, D) ((IN)->inter.add_param((IN)->effect_ref, (I), (D)))
 #define PF_ADD_SLIDER(N, VMIN, VMAX, SMIN, SMAX, D, ID) do { strcpy(def.name, N); def.u.sd.value = (D); def.id = (ID); if (!err) err = PF_ADD_PARAM(in_data, -1, &def); } while (0)
 #define PF_ADD_FLOAT_SLIDERX(N, VMIN, VMAX, SMIN, SMAX, D, PREC, DISP, FL, ID) do { strcpy(def.name, N); def.u.fs_d.value = (D); def.flags |= (FL); def.id = (ID); if (!err) err = PF_ADD_PARAM(in_data, -1, &def); } while (0)

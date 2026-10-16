@@ -60,8 +60,11 @@ tools/preview.cpp          офлайн-превью алгоритма
 
 ### Windows (Visual Studio 2022)
 
-Нужно: Visual Studio 2022 с «Разработка классических приложений на C++», CMake ≥ 3.21,
-для GPU — CUDA Toolkit (даёт и CUDA, и заголовки OpenCL).
+Нужно: **Visual Studio 2022** (бесплатная Community) с нагрузкой
+**«Разработка классических приложений на C++»** — CMake входит в неё.
+Команды запускать в **Developer PowerShell for VS 2022** (меню Пуск), там `cmake` уже в PATH.
+OpenCL-SDK не нужен: плагин сам загружает `OpenCL.dll` из драйвера видеокарты.
+CUDA Toolkit — по желанию, только для CUDA-бэкенда (видеокарты NVIDIA).
 
 1. Склонировать репозиторий и перейти в ветку:
    ```bat
@@ -79,11 +82,11 @@ tools/preview.cpp          офлайн-превью алгоритма
    cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DAE_SDK_ROOT="C:/Users/Velich/AfterEffectsSDK_26.5_win" -DBT_ENABLE_CUDA=ON
    cmake --build build --config Release
    ```
-   Без CUDA Toolkit — убрать `-DBT_ENABLE_CUDA=ON`. Папка `Examples` ищется автоматически,
+   Без CUDA Toolkit — убрать `-DBT_ENABLE_CUDA=ON` (OpenCL-GPU и CPU остаются). Папка `Examples` ищется автоматически,
    даже если архив SDK распакован с лишней вложенной папкой; при нехватке файлов CMake
    перечислит, чего не хватает.
 
-* OpenCL включён по умолчанию (нужны заголовки/`OpenCL.lib`, например из CUDA Toolkit или Khronos OpenCL SDK; `OpenCL.dll` грузится отложенно).
+* OpenCL включён по умолчанию и не требует SDK: `OpenCL.dll` загружается во время работы, только если AE выбрал OpenCL.
 * `-DBT_ENABLE_CUDA=ON` — нужен CUDA Toolkit; архитектуры по умолчанию `61;75;86;89` (`-DCMAKE_CUDA_ARCHITECTURES=...`).
 * PiPL собирается автоматически: `cl /EP` → `PiPLtool.exe` → `.rc`.
 

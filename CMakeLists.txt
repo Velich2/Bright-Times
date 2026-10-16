@@ -13,7 +13,7 @@ else()
   set(_bt_default_opencl OFF)
 endif()
 option(BT_ENABLE_CUDA   "GPU rendering through CUDA (Windows, NVIDIA; needs the CUDA Toolkit)" OFF)
-option(BT_ENABLE_OPENCL "GPU rendering through OpenCL"                                     ${_bt_default_opencl})
+option(BT_ENABLE_OPENCL "GPU rendering through OpenCL (runtime-loaded, no SDK needed)"     ${_bt_default_opencl})
 option(BT_ENABLE_METAL  "GPU rendering through Metal (macOS)"                              ${APPLE})
 
 # --- GPU kernel source embedded as a string (OpenCL / Metal compile it at runtime)
@@ -65,23 +65,10 @@ target_include_directories(BrightTimes PRIVATE src src/gpu "${BT_GEN_DIR}" ${AE_
 add_dependencies(BrightTimes bt_kernel_source)
 
 if(BT_ENABLE_OPENCL)
-  find_package(OpenCL)
-  if(NOT OpenCL_FOUND)
-    message(WARNING "OpenCL SDK not found (install the CUDA Toolkit or Khronos OpenCL-SDK): "
-                    "building without the OpenCL backend.")
-    set(BT_ENABLE_OPENCL OFF)
-  endif()
-endif()
-if(BT_ENABLE_OPENCL)
-  target_sources(BrightTimes PRIVATE src/gpu/BrightTimesOpenCL.cpp)
-  target_compile_definitions(BrightTimes PRIVATE BT_ENABLE_OPENCL CL_TARGET_OPENCL_VERSION=120)
-  target_link_libraries(BrightTimes PRIVATE OpenCL::OpenCL)
-  if(MSVC)
-    # Load OpenCL.dll only when After Effects actually selects OpenCL, so the
-    # plug-in still loads on machines without an OpenCL runtime.
-    target_link_options(BrightTimes PRIVATE "/DELAYLOAD:OpenCL.dll")
-    target_link_libraries(BrightTimes PRIVATE delayimp)
-  endif()
+  # OpenCL is loaded at runtime from the GPU driver (OpenCL.dll): nothing to link.
+  target_sources(BrightTimes PRIVATE src/gpu/BrightTimesOpenCL.cpp src/gpu/BrightTimesCLApi.h)
+  target_compile_definitions(BrightTimes PRIVATE BT_ENABLE_OPENCL)
+  target_link_libraries(BrightTimes PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 if(BT_ENABLE_CUDA)
