@@ -84,13 +84,15 @@ Visual Studio, чтобы установилась его интеграция �
    ```bat
    powershell -ExecutionPolicy Bypass -File tools\check_sdk.ps1 -SdkRoot "C:\Users\Velich\AfterEffectsSDK_26.5_win"
    ```
-3. Собрать одной командой (из корня репозитория, **в любом PowerShell** — скрипт сам
-   находит CMake внутри Visual Studio и CUDA Toolkit, CUDA включается автоматически):
+3. Собрать и установить одной командой (из корня репозитория, **в любом PowerShell** —
+   скрипт сам находит CMake внутри Visual Studio и CUDA Toolkit, CUDA включается автоматически):
    ```bat
    powershell -ExecutionPolicy Bypass -File tools\build.ps1
    ```
-   Опции: `-Cuda off` — без CUDA; `-Install` — сразу скопировать плагин в папку Adobe
-   (PowerShell от администратора); `-SdkRoot <путь>` — другой SDK.
+   После сборки плагин сразу копируется в
+   `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\BrightTimes` — Windows спросит
+   права администратора (UAC). Если After Effects открыт, скрипт попросит его закрыть.
+   Опции: `-NoInstall` — только собрать; `-Cuda off` — без CUDA; `-SdkRoot <путь>` — другой SDK.
    Если CUDA не настроится, скрипт соберёт плагин без неё (OpenCL-GPU и CPU остаются).
 
    То же вручную (Developer PowerShell for VS):
@@ -104,8 +106,8 @@ Visual Studio, чтобы установилась его интеграция �
   (CUDA 13: RTX 20xx и новее; CUDA 12: ещё GTX 10xx), переопределить — `-DBT_CUDA_ARCHITECTURES=...`.
 * PiPL собирается автоматически: `cl /EP` → `PiPLtool.exe` → `.rc`.
 
-Результат: `build/Release/BrightTimes.aex` → скопировать в
-`C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`.
+Результат: `build/Release/BrightTimes.aex` (при ручной сборке скопировать в
+`C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\BrightTimes\`).
 
 ### macOS (Xcode)
 

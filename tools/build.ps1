@@ -2,21 +2,26 @@
   Bright Times - one-step Windows build. Works from any PowerShell window:
   finds CMake inside Visual Studio and the CUDA Toolkit by itself.
 
+  Builds the plug-in and installs it into
+  C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\BrightTimes
+  (asks for administrator rights through the Windows UAC prompt if needed).
+
   Usage (from the repository root):
     powershell -ExecutionPolicy Bypass -File tools\build.ps1
     powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Cuda off
-    powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Install   (run as Administrator)
+    powershell -ExecutionPolicy Bypass -File tools\build.ps1 -NoInstall
 
   Options:
-    -SdkRoot   After Effects SDK folder
-    -Cuda      auto (default: on if the CUDA Toolkit is found) | on | off
-    -Install   copy BrightTimes.aex into the Adobe MediaCore plug-in folder
+    -SdkRoot    After Effects SDK folder
+    -Cuda       auto (default: on if the CUDA Toolkit is found) | on | off
+    -NoInstall  only build, do not copy into the Adobe plug-in folder
 #>
 param(
     [string]$SdkRoot = "C:\Users\Velich\AfterEffectsSDK_26.5_win",
     [ValidateSet("auto", "on", "off")][string]$Cuda = "auto",
     [string]$Config = "Release",
-    [switch]$Install
+    [switch]$NoInstall,
+    [switch]$Install   # kept for compatibility: installing is now the default
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,17 +118,52 @@ Write-Host "`nBuilt: $aex" -ForegroundColor Green
 Write-Host ("GPU backends: OpenCL" + $(if ($useCuda) { " + CUDA" } else { "" }) + ", CPU fallback")
 
 # --- Install
-$target = "${env:ProgramFiles}\Adobe\Common\Plug-ins\7.0\MediaCore\BrightTimes"
-if ($Install) {
-    Step "Install"
-    try {
-        New-Item -ItemType Directory -Force -Path $target | Out-Null
-        Copy-Item -Force $aex $target
-        Write-Host "Installed to $target - restart After Effects: Effect > Bright Times > Bright Times" -ForegroundColor Green
-    } catch {
-        Fail "Could not copy to $target. Run PowerShell as Administrator, or copy the file manually."
+$target    = "${env:ProgramFiles}\Adobe\Common\Plug-ins\7.0\MediaCore\BrightTimes"
+$targetAex = Join-Path $target "BrightTimes.aex"
+if ($NoInstall) {
+    Write-Host "`nNot installed (-NoInstall). Copy BrightTimes.aex to $target manually."
+    exit 0
+}
+
+Step "Install"
+
+# A running After Effects keeps the old plug-in file locked.
+while (Get-Process -Name "AfterFX" -ErrorAction SilentlyContinue) {
+    Write-Host "After Effects is running - it locks the plug-in file." -ForegroundColor Yellow
+    $answer = Read-Host "Close After Effects and press Enter (or type s to skip installing)"
+    if ($answer -eq "s") {
+        Write-Host "Skipped. Copy $aex to $target later." -ForegroundColor Yellow
+        exit 0
     }
+}
+
+function Test-Admin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Quote([string]$s) { return "'" + $s.Replace("'", "''") + "'" }
+$copyCmd = "try { New-Item -ItemType Directory -Force -Path $(Quote $target) -ErrorAction Stop | Out-Null; " +
+           "Copy-Item -Force -ErrorAction Stop -Path $(Quote $aex) -Destination $(Quote $targetAex); exit 0 } catch { exit 1 }"
+
+if (Test-Admin) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -Command $copyCmd | Out-Host
 } else {
-    Write-Host "`nTo install: copy BrightTimes.aex to $target"
-    Write-Host "(or rerun as Administrator with -Install), then restart After Effects."
+    Write-Host "Program Files needs administrator rights - confirm the Windows prompt (UAC)."
+    try {
+        Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden `
+            -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $copyCmd) | Out-Null
+    } catch {
+        Write-Host "The administrator prompt was cancelled." -ForegroundColor Yellow
+    }
+}
+
+# Verify by content, whatever happened above.
+$installed = (Test-Path $targetAex) -and
+             ((Get-FileHash $aex).Hash -eq (Get-FileHash $targetAex).Hash)
+if ($installed) {
+    Write-Host "Installed: $targetAex" -ForegroundColor Green
+    Write-Host "Start After Effects: Effect > Bright Times > Bright Times"
+} else {
+    Fail "Could not copy to $target. Close After Effects and run the script again, or copy $aex manually."
 }
