@@ -24,6 +24,10 @@ constexpr A_long kCurrentFrameCheckoutId = 10000;
 // Re-checkouts of samples that fell outside the clip (Hold First/Last Frame).
 constexpr A_long kHeldFrameCheckoutBase = 20000;
 
+constexpr A_long kAppPremiere = 0x50724D72;  // 'PrMr'
+
+inline bool IsPremiere(const PF_InData* in_data) { return in_data->appl_id == kAppPremiere; }
+
 struct RenderData {
     bt::Settings             settings;
     std::vector<bt::Sample>  samples;
@@ -345,6 +349,27 @@ template <> struct PixelTraits<PF_PixelFloat> {
     using Chan                    = PF_FpShort;
 };
 
+// Premiere Pro native formats (PrPixelFormat_BGRA_4444_8u / _32f): B G R A order.
+struct PixelBGRA8 {
+    A_u_char blue, green, red, alpha;
+};
+struct PixelBGRA32f {
+    float blue, green, red, alpha;
+};
+template <> struct PixelTraits<PixelBGRA8> {
+    static constexpr float kMax   = 255.f;
+    static constexpr bool  kClamp = true;
+    using Chan                    = A_u_char;
+};
+template <> struct PixelTraits<PixelBGRA32f> {
+    static constexpr float kMax   = 1.f;
+    static constexpr bool  kClamp = false;
+    using Chan                    = float;
+};
+
+// Memory layout of a world's pixels.
+enum PixKind { kPixUnknown = 0, kPixARGB8, kPixARGB16, kPixARGB32f, kPixBGRA8, kPixBGRA32f };
+
 // AE pixels are straight (un-premultiplied); the core works premultiplied.
 template <typename P>
 inline void LoadPremul(const P& p, float out[4])
@@ -440,23 +465,39 @@ PF_Err AccumulateRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*itera
     return PF_Err_NONE;
 }
 
+using RowFn = PF_Err (*)(void*, A_long, A_long, A_long);
+
+// Row reader for a source world of the given layout (sources may differ from
+// the output, e.g. in Premiere Pro when checked-out frames keep their format).
+RowFn AccumulateFnFor(PixKind kind)
+{
+    switch (kind) {
+        case kPixARGB8:   return AccumulateRowFn<PF_Pixel8>;
+        case kPixARGB16:  return AccumulateRowFn<PF_Pixel16>;
+        case kPixARGB32f: return AccumulateRowFn<PF_PixelFloat>;
+        case kPixBGRA8:   return AccumulateRowFn<PixelBGRA8>;
+        case kPixBGRA32f: return AccumulateRowFn<PixelBGRA32f>;
+        default:          return nullptr;
+    }
+}
+
 struct FinalizeCtx {
     PF_EffectWorld*       out;
     const PF_EffectWorld* current;  // may be null
+    PixKind               currentKind;
     bt::BlendMode         blend;
     float                 mix;
     float                 gain;
     const float*          acc;
 };
 
-template <typename P>
-PF_Err FinalizeRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*iterations*/)
+template <typename P, typename PCur>
+void FinalizeRow(const FinalizeCtx& c, A_long y)
 {
-    const FinalizeCtx& c   = *static_cast<const FinalizeCtx*>(refcon);
-    const SourceSpan   s   = MapRow(c.out, c.current, y);
-    const P*           cur = s.valid() ? RowPtr<P>(c.current, s.sy) : nullptr;
-    P*                 dst = RowPtr<P>(c.out, y);
-    const float*       acc = c.acc + 4 * static_cast<size_t>(y) * c.out->width;
+    const SourceSpan s   = MapRow(c.out, c.current, y);
+    const PCur*      cur = s.valid() ? RowPtr<PCur>(c.current, s.sy) : nullptr;
+    P*               dst = RowPtr<P>(c.out, y);
+    const float*     acc = c.acc + 4 * static_cast<size_t>(y) * c.out->width;
 
     float orig[4], res[4];
     for (A_long x = 0; x < c.out->width; ++x, acc += 4) {
@@ -465,10 +506,22 @@ PF_Err FinalizeRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*iterati
         bt::FinalizePixel(c.blend, c.mix, acc, hasOrig ? orig : nullptr, res, c.gain);
         StoreUnpremul(res, dst[x]);
     }
-    return PF_Err_NONE;
 }
 
-using RowFn = PF_Err (*)(void*, A_long, A_long, A_long);
+template <typename P>
+PF_Err FinalizeRowFn(void* refcon, A_long /*thread*/, A_long y, A_long /*iterations*/)
+{
+    const FinalizeCtx& c = *static_cast<const FinalizeCtx*>(refcon);
+    switch (c.currentKind) {
+        case kPixARGB16:  FinalizeRow<P, PF_Pixel16>(c, y); break;
+        case kPixARGB32f: FinalizeRow<P, PF_PixelFloat>(c, y); break;
+        case kPixBGRA8:   FinalizeRow<P, PixelBGRA8>(c, y); break;
+        case kPixBGRA32f: FinalizeRow<P, PixelBGRA32f>(c, y); break;
+        case kPixARGB8:
+        default:          FinalizeRow<P, PF_Pixel8>(c, y); break;
+    }
+    return PF_Err_NONE;
+}
 
 // Runs fn for every row: multi-threaded through the Iterate8 suite, or serially
 // when the host does not provide it (some suites are missing in Premiere Pro).
@@ -486,20 +539,21 @@ PF_Err ForEachRow(PF_InData* in_data, A_long rows, void* ctx, RowFn fn)
 class FrameSource {
 public:
     virtual ~FrameSource() = default;
-    virtual PF_Err Get(size_t i, const PF_EffectWorld** world) = 0;
+    virtual PF_Err Get(size_t i, const PF_EffectWorld** world, PixKind* kind) = 0;
     virtual PF_Err Release(size_t i) = 0;
 };
 
 // After Effects (SmartFX): frames checked out in PreRender.
 class SmartFrameSource : public FrameSource {
 public:
-    SmartFrameSource(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderData& rd)
-        : in_data_(in_data), extra_(extra), rd_(rd) {}
-    PF_Err Get(size_t i, const PF_EffectWorld** world) override
+    SmartFrameSource(PF_InData* in_data, PF_SmartRenderExtra* extra, const RenderData& rd, PixKind kind)
+        : in_data_(in_data), extra_(extra), rd_(rd), kind_(kind) {}
+    PF_Err Get(size_t i, const PF_EffectWorld** world, PixKind* kind) override
     {
         PF_EffectWorld* w = nullptr;
         const PF_Err    e = extra_->cb->checkout_layer_pixels(in_data_->effect_ref, rd_.checkoutIds[i], &w);
         *world = w;
+        *kind  = kind_;  // SmartFX: inputs match the output format
         return e;
     }
     PF_Err Release(size_t i) override
@@ -511,11 +565,12 @@ private:
     PF_InData*           in_data_;
     PF_SmartRenderExtra* extra_;
     const RenderData&    rd_;
+    PixKind              kind_;
 };
 
 template <typename P>
 PF_Err RenderWorld(PF_InData* in_data, FrameSource& frames, const RenderData& rd,
-                   PF_EffectWorld* out, const PF_EffectWorld* current)
+                   PF_EffectWorld* out, const PF_EffectWorld* current, PixKind currentKind)
 {
     PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
     if (out->width <= 0 || out->height <= 0) return err;
@@ -525,18 +580,21 @@ PF_Err RenderWorld(PF_InData* in_data, FrameSource& frames, const RenderData& rd
     bt::InitAccumRow(s.blendMode, acc.data(), out->width * out->height);
 
     for (size_t i = 0; i < rd.samples.size() && !err; ++i) {
-        const PF_EffectWorld* src = nullptr;
-        ERR(frames.Get(i, &src));
+        const PF_EffectWorld* src  = nullptr;
+        PixKind               kind = kPixUnknown;
+        ERR(frames.Get(i, &src, &kind));
         if (!err && src && src->data) {
+            const RowFn fn = AccumulateFnFor(kind);
+            if (!fn) err = PF_Err_UNRECOGNIZED_PARAM_TYPE;
             AccumulateCtx ctx{out, src, &rd.samples[i], s.blendMode, s.tintMode, acc.data()};
-            ERR(ForEachRow(in_data, out->height, &ctx, AccumulateRowFn<P>));
+            ERR(ForEachRow(in_data, out->height, &ctx, fn));
         }
         ERR2(frames.Release(i));
         ERR(PF_ABORT(in_data));
     }
 
     if (!err) {
-        FinalizeCtx ctx{out, current, s.blendMode, s.mix, s.intensity, acc.data()};
+        FinalizeCtx ctx{out, current, currentKind, s.blendMode, s.mix, s.intensity, acc.data()};
         ERR(ForEachRow(in_data, out->height, &ctx, FinalizeRowFn<P>));
     }
     return err;
@@ -704,9 +762,22 @@ PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data)
 
     // Premiere Pro supports neither SmartFX nor the After Effects GPU path: it
     // uses the classic PF_Cmd_RENDER (ClassicRender) with 8-bit frames.
-    if (in_data->appl_id == 0x50724D72 /* 'PrMr' */) {
+    if (IsPremiere(in_data)) {
         out_data->out_flags  = PF_OutFlag_WIDE_TIME_INPUT | PF_OutFlag_SEND_UPDATE_PARAMS_UI;
         out_data->out_flags2 = 0;
+
+        // Render in Premiere's native BGRA, 32-bit float when the sequence asks
+        // for maximum depth, 8-bit otherwise.
+        SuiteScope<PF_PixelFormatSuite1> pf(in_data, kPFPixelFormatSuite, kPFPixelFormatSuiteVersion1);
+        if (pf) {
+            pf->ClearSupportedPixelFormats(in_data->effect_ref);
+            pf->AddSupportedPixelFormat(in_data->effect_ref, PrPixelFormat_BGRA_4444_32f);
+            pf->AddSupportedPixelFormat(in_data->effect_ref, PrPixelFormat_BGRA_4444_8u);
+        }
+        // Neighbouring frames from PF_CHECKOUT_PARAM in the same format as the output
+        // (otherwise they arrive as 8-bit ARGB; the renderer handles both).
+        SuiteScope<PF_UtilitySuite4> util(in_data, kPFUtilitySuite, kPFUtilitySuiteVersion4);
+        if (util) util->EffectWantsCheckedOutFramesToMatchRenderPixelFormat(in_data->effect_ref);
     }
     return PF_Err_NONE;
 }
@@ -835,12 +906,23 @@ PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra, bool gpu)
             if (!ws) err = PF_Err_BAD_CALLBACK_PARAM;
             ERR(ws->PF_GetPixelFormat(out, &fmt));
             if (!err) {
-                SmartFrameSource frames(in_data, extra, *rd);
                 switch (fmt) {
-                    case PF_PixelFormat_ARGB128: err = RenderWorld<PF_PixelFloat>(in_data, frames, *rd, out, current); break;
-                    case PF_PixelFormat_ARGB64:  err = RenderWorld<PF_Pixel16>(in_data, frames, *rd, out, current); break;
-                    case PF_PixelFormat_ARGB32:  err = RenderWorld<PF_Pixel8>(in_data, frames, *rd, out, current); break;
-                    default:                     err = PF_Err_BAD_CALLBACK_PARAM; break;
+                    case PF_PixelFormat_ARGB128: {
+                        SmartFrameSource frames(in_data, extra, *rd, kPixARGB32f);
+                        err = RenderWorld<PF_PixelFloat>(in_data, frames, *rd, out, current, kPixARGB32f);
+                        break;
+                    }
+                    case PF_PixelFormat_ARGB64: {
+                        SmartFrameSource frames(in_data, extra, *rd, kPixARGB16);
+                        err = RenderWorld<PF_Pixel16>(in_data, frames, *rd, out, current, kPixARGB16);
+                        break;
+                    }
+                    case PF_PixelFormat_ARGB32: {
+                        SmartFrameSource frames(in_data, extra, *rd, kPixARGB8);
+                        err = RenderWorld<PF_Pixel8>(in_data, frames, *rd, out, current, kPixARGB8);
+                        break;
+                    }
+                    default: err = PF_Err_BAD_CALLBACK_PARAM; break;
                 }
             }
         }
@@ -855,6 +937,35 @@ PF_Err SmartRender(PF_InData* in_data, PF_SmartRenderExtra* extra, bool gpu)
 // PF_Cmd_RENDER. Neighbouring frames come from PF_CHECKOUT_PARAM on the layer.
 // ---------------------------------------------------------------------------
 
+// Pixel layout of a world in classic render. Premiere Pro reports it through the
+// PF Pixel Format Suite (formats registered in GlobalSetup); otherwise the world
+// is After Effects ARGB, 8 or 16 bit.
+class PixelKindQuery {
+public:
+    explicit PixelKindQuery(PF_InData* in_data)
+        : pf_(in_data, kPFPixelFormatSuite, kPFPixelFormatSuiteVersion1), premiere_(IsPremiere(in_data)) {}
+
+    PixKind Of(PF_EffectWorld* w) const
+    {
+        if (premiere_ && pf_) {
+            PrPixelFormat fmt = PrPixelFormat_Invalid;
+            if (pf_->GetPixelFormat(w, &fmt) == PF_Err_NONE) {
+                switch (fmt) {
+                    case PrPixelFormat_BGRA_4444_32f: return kPixBGRA32f;
+                    case PrPixelFormat_BGRA_4444_8u:  return kPixBGRA8;
+                    case PrPixelFormat_ARGB_4444_8u:  return kPixARGB8;
+                    default:                          return kPixUnknown;
+                }
+            }
+        }
+        return (w->world_flags & PF_WorldFlag_DEEP) ? kPixARGB16 : kPixARGB8;
+    }
+
+private:
+    SuiteScope<PF_PixelFormatSuite1> pf_;
+    bool                             premiere_;
+};
+
 // Copy of a world with the SmartFX-only origin cleared (unused in classic render).
 PF_EffectWorld PlainWorld(const PF_EffectWorld& w)
 {
@@ -866,13 +977,14 @@ PF_EffectWorld PlainWorld(const PF_EffectWorld& w)
 
 class ParamFrameSource : public FrameSource {
 public:
-    ParamFrameSource(PF_InData* in_data, const RenderData& rd, bool holdEdges)
-        : in_data_(in_data), rd_(rd), hold_(holdEdges),
+    ParamFrameSource(PF_InData* in_data, const RenderData& rd, bool holdEdges, const PixelKindQuery& kinds)
+        : in_data_(in_data), rd_(rd), hold_(holdEdges), kinds_(kinds),
           params_(rd.samples.size()), worlds_(rd.samples.size()), checkedOut_(rd.samples.size(), false) {}
 
-    PF_Err Get(size_t i, const PF_EffectWorld** world) override
+    PF_Err Get(size_t i, const PF_EffectWorld** world, PixKind* kind) override
     {
         *world = nullptr;
+        *kind  = kPixUnknown;
         const A_long step = in_data_->time_step;
         A_long       t    = in_data_->current_time + rd_.samples[i].frameOffset * step;
         // Hold First/Last Frame: stay inside the clip.
@@ -886,6 +998,7 @@ public:
             if (!err) err = Checkout(i, in_data_->current_time);
         }
         if (!err) {
+            *kind      = kinds_.Of(&params_[i].u.ld);  // query the host's own world
             worlds_[i] = PlainWorld(params_[i].u.ld);
             *world     = &worlds_[i];
         }
@@ -917,6 +1030,7 @@ private:
     PF_InData*                  in_data_;
     const RenderData&           rd_;
     bool                        hold_;
+    const PixelKindQuery&       kinds_;
     std::vector<PF_ParamDef>    params_;
     std::vector<PF_EffectWorld> worlds_;
     std::vector<bool>           checkedOut_;
@@ -936,15 +1050,20 @@ PF_Err ClassicRender(PF_InData* in_data, PF_ParamDef* params[], PF_LayerDef* out
     if (err) return err;
     rd.samples = bt::BuildSamples(rd.settings);
 
-    PF_EffectWorld   out     = PlainWorld(*output);  // pixels are written through out.data
-    PF_EffectWorld   current = PlainWorld(params[BT_INPUT]->u.ld);
-    ParamFrameSource frames(in_data, rd, hold);
+    const PixelKindQuery kinds(in_data);
+    const PixKind        outKind = kinds.Of(output);
+    const PixKind        curKind = kinds.Of(&params[BT_INPUT]->u.ld);
+    PF_EffectWorld       out     = PlainWorld(*output);  // pixels are written through out.data
+    PF_EffectWorld       current = PlainWorld(params[BT_INPUT]->u.ld);
+    ParamFrameSource     frames(in_data, rd, hold, kinds);
 
-    // Classic render gets 8-bit (or AE 16-bit) ARGB worlds.
-    if (output->world_flags & PF_WorldFlag_DEEP) {
-        return RenderWorld<PF_Pixel16>(in_data, frames, rd, &out, &current);
+    switch (outKind) {
+        case kPixBGRA32f: return RenderWorld<PixelBGRA32f>(in_data, frames, rd, &out, &current, curKind);
+        case kPixBGRA8:   return RenderWorld<PixelBGRA8>(in_data, frames, rd, &out, &current, curKind);
+        case kPixARGB16:  return RenderWorld<PF_Pixel16>(in_data, frames, rd, &out, &current, curKind);
+        case kPixARGB8:   return RenderWorld<PF_Pixel8>(in_data, frames, rd, &out, &current, curKind);
+        default:          return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
-    return RenderWorld<PF_Pixel8>(in_data, frames, rd, &out, &current);
 }
 
 }  // namespace

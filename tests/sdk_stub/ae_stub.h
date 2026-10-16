@@ -92,3 +92,19 @@ typedef PF_Err (*PF_PluginDataCB2)(PF_PluginDataPtr, const A_u_char*, const A_u_
 #define PF_ADD_TOPIC(N, ID) do { strcpy(def.name, N); def.id = (ID); if (!err) err = PF_ADD_PARAM(in_data, -1, &def); } while (0)
 #define PF_END_TOPIC(ID) do { def.id = (ID); if (!err) err = PF_ADD_PARAM(in_data, -1, &def); } while (0)
 typedef PF_LayerDef PF_LayerDef;
+
+// ---- Premiere Pro support (PrSDKAESupport.h / PrSDKPixelFormat.h)
+typedef int PrPixelFormat;
+enum { PrPixelFormat_BGRA_4444_8u = 1634887522, PrPixelFormat_ARGB_4444_8u = 1650946657,
+       PrPixelFormat_BGRA_4444_32f = 1634879298, PrPixelFormat_Invalid = 1717854562 };
+#define kPFPixelFormatSuite "PF Pixel Format Suite"
+#define kPFPixelFormatSuiteVersion1 1
+struct PF_PixelFormatSuite1 {
+  PF_Err (*AddSupportedPixelFormat)(PF_ProgPtr, PrPixelFormat);
+  PF_Err (*ClearSupportedPixelFormats)(PF_ProgPtr);
+  void* NewWorldOfPixelFormat; void* DisposeWorld;
+  PF_Err (*GetPixelFormat)(PF_EffectWorld*, PrPixelFormat*);
+};
+#define kPFUtilitySuite "PF Utility Suite"
+#define kPFUtilitySuiteVersion4 4
+struct PF_UtilitySuite4 { PF_Err (*EffectWantsCheckedOutFramesToMatchRenderPixelFormat)(PF_ProgPtr); };

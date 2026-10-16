@@ -17,27 +17,39 @@ static int W = 320, H = 180;
 struct Frame { std::vector<char> buf; PF_EffectWorld w; };
 static std::map<A_long, A_long> g_checkTime;  // id -> time
 static std::map<A_long, Frame*> g_out;
-static int pixSize() { return g_fmt == PF_PixelFormat_ARGB32 ? 4 : g_fmt == PF_PixelFormat_ARGB64 ? 8 : 16; }
-static float maxv() { return g_fmt == PF_PixelFormat_ARGB32 ? 255.f : g_fmt == PF_PixelFormat_ARGB64 ? 32768.f : 1.f; }
+// Every world remembers its pixel format: AE ARGB 8/16/32f or Premiere BGRA 8u/32f.
+static std::map<const void*, A_long> g_worldFmt;
+static A_long g_srcFmt = 0;  // format of layer frames, 0 = same as g_fmt
+static A_long fmtOf(const PF_EffectWorld& w) { auto it = g_worldFmt.find(w.data); return it == g_worldFmt.end() ? g_fmt : it->second; }
+static int pixSize(A_long f) { return (f == PF_PixelFormat_ARGB32 || f == PrPixelFormat_BGRA_4444_8u) ? 4 : f == PF_PixelFormat_ARGB64 ? 8 : 16; }
+static float maxv(A_long f) { return (f == PF_PixelFormat_ARGB32 || f == PrPixelFormat_BGRA_4444_8u) ? 255.f : f == PF_PixelFormat_ARGB64 ? 32768.f : 1.f; }
+struct BGRA8 { unsigned char b, g, r, a; }; struct BGRA32 { float b, g, r, a; };
 static void put(PF_EffectWorld& w, int x, int y, float a, float r, float g, float b) {
-  char* p = (char*)w.data + y * w.rowbytes + x * pixSize(); float m = maxv();
-  if (g_fmt == PF_PixelFormat_ARGB32) { auto* q=(PF_Pixel8*)p; q->alpha=a*m+.5f; q->red=r*m+.5f; q->green=g*m+.5f; q->blue=b*m+.5f; }
-  else if (g_fmt == PF_PixelFormat_ARGB64) { auto* q=(PF_Pixel16*)p; q->alpha=a*m+.5f; q->red=r*m+.5f; q->green=g*m+.5f; q->blue=b*m+.5f; }
+  const A_long f = fmtOf(w); char* p = (char*)w.data + y * w.rowbytes + x * pixSize(f); float m = maxv(f);
+  if (f == PF_PixelFormat_ARGB32) { auto* q=(PF_Pixel8*)p; q->alpha=a*m+.5f; q->red=r*m+.5f; q->green=g*m+.5f; q->blue=b*m+.5f; }
+  else if (f == PF_PixelFormat_ARGB64) { auto* q=(PF_Pixel16*)p; q->alpha=a*m+.5f; q->red=r*m+.5f; q->green=g*m+.5f; q->blue=b*m+.5f; }
+  else if (f == PrPixelFormat_BGRA_4444_8u) { auto* q=(BGRA8*)p; q->a=a*m+.5f; q->r=r*m+.5f; q->g=g*m+.5f; q->b=b*m+.5f; }
+  else if (f == PrPixelFormat_BGRA_4444_32f) { auto* q=(BGRA32*)p; q->a=a; q->r=r; q->g=g; q->b=b; }
   else { auto* q=(PF_PixelFloat*)p; q->alpha=a; q->red=r; q->green=g; q->blue=b; }
 }
-static void get(const PF_EffectWorld& w, int x, int y, float* o) {
-  const char* p = (const char*)w.data + y * w.rowbytes + x * pixSize(); float m = maxv();
-  if (g_fmt == PF_PixelFormat_ARGB32) { auto* q=(const PF_Pixel8*)p; o[0]=q->alpha/m; o[1]=q->red/m; o[2]=q->green/m; o[3]=q->blue/m; }
-  else if (g_fmt == PF_PixelFormat_ARGB64) { auto* q=(const PF_Pixel16*)p; o[0]=q->alpha/m; o[1]=q->red/m; o[2]=q->green/m; o[3]=q->blue/m; }
+static void get(const PF_EffectWorld& w, int x, int y, float* o) {  // o = A R G B
+  const A_long f = fmtOf(w); const char* p = (const char*)w.data + y * w.rowbytes + x * pixSize(f); float m = maxv(f);
+  if (f == PF_PixelFormat_ARGB32) { auto* q=(const PF_Pixel8*)p; o[0]=q->alpha/m; o[1]=q->red/m; o[2]=q->green/m; o[3]=q->blue/m; }
+  else if (f == PF_PixelFormat_ARGB64) { auto* q=(const PF_Pixel16*)p; o[0]=q->alpha/m; o[1]=q->red/m; o[2]=q->green/m; o[3]=q->blue/m; }
+  else if (f == PrPixelFormat_BGRA_4444_8u) { auto* q=(const BGRA8*)p; o[0]=q->a/m; o[1]=q->r/m; o[2]=q->g/m; o[3]=q->b/m; }
+  else if (f == PrPixelFormat_BGRA_4444_32f) { auto* q=(const BGRA32*)p; o[0]=q->a; o[1]=q->r; o[2]=q->g; o[3]=q->b; }
   else { auto* q=(const PF_PixelFloat*)p; o[0]=q->alpha; o[1]=q->red; o[2]=q->green; o[3]=q->blue; }
 }
-static Frame* makeWorld() { auto* f = new Frame; f->w = {}; f->w.width=W; f->w.height=H; f->w.rowbytes=W*pixSize()+16; f->buf.assign(f->w.rowbytes*H, 0); f->w.data=f->buf.data(); return f; }
+static Frame* makeWorld(A_long fmt = 0) {
+  if (!fmt) fmt = g_fmt;
+  auto* f = new Frame; f->w = {}; f->w.width=W; f->w.height=H; f->w.rowbytes=W*pixSize(fmt)+16; f->buf.assign(f->w.rowbytes*H, 0); f->w.data=f->buf.data();
+  g_worldFmt[f->w.data] = fmt; return f; }
 // The layer only has content in [g_clipStart, g_clipEnd): like AE, times outside
 // return an empty result rect and transparent pixels.
 static A_long g_clipStart = -1000000, g_clipEnd = 1000000;
 static bool inClip(A_long t) { return t >= g_clipStart && t < g_clipEnd; }
 static Frame* renderFrame(A_long t) {  // t in frames (time_step = 1)
-  Frame* f = makeWorld();
+  Frame* f = makeWorld(g_srcFmt);
   if (!inClip(t)) return f;
   for (int y=0;y<H;++y) for (int x=0;x<W;++x) {
     float v = 0.5f + 0.3f*y/H; if ((x/16+y/16)%2) v -= 0.05f;
@@ -83,8 +95,23 @@ static PF_Iterate8Suite2 g_iter{iterate_generic}; static PF_WorldSuite2 g_world{
 static PF_Err updui(PF_ProgPtr, PF_ParamIndex i, const PF_ParamDef* d) { std::printf("  UI param %d %s\n", i, (d->ui_flags & PF_PUI_DISABLED) ? "disabled" : "enabled"); return 0; }
 static PF_ParamUtilsSuite3 g_pu{updui};
 static int g_acquired = 0;
+// Premiere Pro suites (only when the host pretends to be Premiere).
+static bool g_premiereHost = false;
+static std::vector<PrPixelFormat> g_registeredFormats;
+static int g_matchFormatCalls = 0;
+static PF_Err addFmt(PF_ProgPtr, PrPixelFormat f) { g_registeredFormats.push_back(f); return 0; }
+static PF_Err clearFmt(PF_ProgPtr) { g_registeredFormats.clear(); return 0; }
+static PF_Err getPrFmt(PF_EffectWorld* w, PrPixelFormat* f) {
+  const A_long k = fmtOf(*w);
+  if (k == PF_PixelFormat_ARGB32 || k == PrPixelFormat_BGRA_4444_8u || k == PrPixelFormat_BGRA_4444_32f) { *f = k; return 0; }
+  return PF_Err_BAD_CALLBACK_PARAM; }
+static PF_PixelFormatSuite1 g_pfs{addFmt, clearFmt, nullptr, nullptr, getPrFmt};
+static PF_Err matchFmt(PF_ProgPtr) { ++g_matchFormatCalls; return 0; }
+static PF_UtilitySuite4 g_util{matchFmt};
 static SPErr acq(const char* n, int32_t, const void** s) { ++g_acquired; std::string sn(n);
-  if (sn == kPFIterate8Suite) *s = &g_iter; else if (sn == kPFWorldSuite) *s = &g_world; else if (sn == kPFParamUtilsSuite) *s = &g_pu; else return 1; return 0; }
+  if (sn == kPFIterate8Suite) *s = &g_iter; else if (sn == kPFWorldSuite) *s = &g_world; else if (sn == kPFParamUtilsSuite) *s = &g_pu;
+  else if (g_premiereHost && sn == kPFPixelFormatSuite) *s = &g_pfs; else if (g_premiereHost && sn == kPFUtilitySuite) *s = &g_util;
+  else { --g_acquired; return 1; } return 0; }
 static SPErr rel(const char*, int32_t) { --g_acquired; return 0; }
 
 // Captures what PluginDataEntryFunction2 registers (must match BrightTimesPiPL.r).
@@ -135,7 +162,7 @@ int main(int argc, char** argv) {
     pout.delete_pre_render_data_func(pout.pre_render_data);
     // checks: static bg pixel (300,10) must equal original in optical mode
     float o[4], src[4]; get(g_output->w, 300, 10, o); Frame* f0 = renderFrame(5); get(f0->w, 300, 10, src);
-    std::printf("blend %d fmt %d checkouts %zu leaked_pix %zu suites %d | bg out %.4f %.4f %.4f %.4f src %.4f %.4f %.4f\n", bm, pixSize()*8/4, g_checkTime.size(), g_pix.size(), g_acquired, o[0],o[1],o[2],o[3], src[1],src[2],src[3]);
+    std::printf("blend %d fmt %d checkouts %zu leaked_pix %zu suites %d | bg out %.4f %.4f %.4f %.4f src %.4f %.4f %.4f\n", bm, pixSize(g_fmt)*8/4, g_checkTime.size(), g_pix.size(), g_acquired, o[0],o[1],o[2],o[3], src[1],src[2],src[3]);
     if (fmt == PF_PixelFormat_ARGB32) {
       std::string path = std::string(outdir) + "/host_blend" + std::to_string(bm) + ".ppm"; FILE* fp = fopen(path.c_str(), "wb"); fprintf(fp, "P6\n%d %d\n255\n", W, H);
       for (int y=0;y<H;++y) for (int x=0;x<W;++x) { float q[4]; get(g_output->w,x,y,q); for (int c=1;c<4;++c) fputc((int)(q[c]*255+.5f), fp); }
@@ -268,8 +295,11 @@ int main(int argc, char** argv) {
   {
     PF_InData pin_data = in; pin_data.appl_id = 0x50724D72;  // 'PrMr'
     PF_OutData pout{};
+    g_premiereHost = true;
     EffectMain(PF_Cmd_GLOBAL_SETUP, &pin_data, &pout, nullptr, nullptr, nullptr);
-    const bool flagsOk = !(pout.out_flags2 & PF_OutFlag2_SUPPORTS_SMART_RENDER) && !(pout.out_flags2 & PF_OutFlag2_SUPPORTS_GPU_RENDER_F32);
+    const bool flagsOk = !(pout.out_flags2 & PF_OutFlag2_SUPPORTS_SMART_RENDER) && !(pout.out_flags2 & PF_OutFlag2_SUPPORTS_GPU_RENDER_F32) &&
+                         g_registeredFormats.size() == 2 && g_registeredFormats[0] == PrPixelFormat_BGRA_4444_32f &&
+                         g_registeredFormats[1] == PrPixelFormat_BGRA_4444_8u && g_matchFormatCalls == 1;
 
     g_fmt = PF_PixelFormat_ARGB32;
     g_params[BT_FRAMES_BACKWARD-1].u.fs_d.value = 3; g_params[BT_FRAMES_FORWARD-1].u.fs_d.value = 2;
@@ -301,8 +331,49 @@ int main(int argc, char** argv) {
     }
     g_params[BT_FRAMES_BACKWARD-1].u.fs_d.value = 4; g_params[BT_FRAMES_FORWARD-1].u.fs_d.value = 4;
     g_params[BT_BLEND_MODE-1].u.pd.value = 1;
-    std::printf("premiere: flags %s, classic render == smart render %s\n", flagsOk ? "OK" : "FAIL", same ? "OK" : "FAIL");
+    std::printf("premiere: flags/formats %s, classic render == smart render %s\n", flagsOk ? "OK" : "FAIL", same ? "OK" : "FAIL");
     if (!flagsOk || !same) return 1;
+
+    // Premiere native formats against a SmartFX reference render of format refFmt.
+    // Returns max |difference| (ARGB, 0..1) over all blend modes.
+    auto premiereDiff = [&](A_long outFmt, A_long srcFmt, A_long refFmt) -> double {
+      double maxd = 0;
+      for (int bm = 1; bm <= 5; ++bm) {
+        g_params[BT_BLEND_MODE-1].u.pd.value = bm;
+        g_fmt = refFmt; g_srcFmt = 0; g_checkTime.clear();
+        PF_PreRenderInput prin{}; PF_PreRenderOutput prout{}; PF_PreRenderCallbacks pcb{checkout_layer};
+        PF_PreRenderExtra pex{&prin, &prout, &pcb};
+        EffectMain(PF_Cmd_SMART_PRE_RENDER, &in, &out, nullptr, nullptr, &pex);
+        Frame* ref = makeWorld(); g_output = ref;
+        PF_SmartRenderInput sin{}; sin.pre_render_data = prout.pre_render_data;
+        PF_SmartRenderCallbacks scb{checkout_layer_pixels, checkin_layer_pixels, checkout_output};
+        PF_SmartRenderExtra sex{&sin, &scb}; g_inputCheckouts = 0;
+        EffectMain(PF_Cmd_SMART_RENDER, &in, &out, nullptr, nullptr, &sex);
+        prout.delete_pre_render_data_func(prout.pre_render_data);
+
+        g_fmt = outFmt; g_srcFmt = srcFmt;
+        Frame* cur = renderFrame(in.current_time);   // the layer param itself
+        Frame* res = makeWorld(outFmt);
+        std::vector<PF_ParamDef*> pp(out.num_params); PF_ParamDef layer{}; layer.u.ld = cur->w; pp[0] = &layer;
+        for (int k = 1; k < out.num_params; ++k) pp[k] = &g_params[k-1];
+        const PF_Err e = EffectMain(PF_Cmd_RENDER, &pin_data, &pout, pp.data(), &res->w, nullptr);
+        if (e || !g_paramFrames.empty()) { delete ref; delete res; delete cur; return 1e9; }
+        for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
+          float a[4], b[4]; get(ref->w, x, y, a); get(res->w, x, y, b);
+          for (int c = 0; c < 4; ++c) maxd = std::max(maxd, (double)std::fabs(a[c] - b[c]));
+        }
+        delete ref; delete res; delete cur;
+      }
+      g_fmt = PF_PixelFormat_ARGB32; g_srcFmt = 0;
+      return maxd;
+    };
+    const double d32  = premiereDiff(PrPixelFormat_BGRA_4444_32f, 0, PF_PixelFormat_ARGB128);  // == AE 32 bpc
+    const double d8   = premiereDiff(PrPixelFormat_BGRA_4444_8u, 0, PF_PixelFormat_ARGB32);    // == AE 8 bpc
+    // Frames stayed 8-bit ARGB while the output is 32f: only input quantisation differs.
+    const double dmix = premiereDiff(PrPixelFormat_BGRA_4444_32f, PF_PixelFormat_ARGB32, PF_PixelFormat_ARGB128);
+    std::printf("premiere formats: BGRA 32f max diff %.1e, BGRA 8u %.1e, 32f out + 8-bit frames %.1e\n", d32, d8, dmix);
+    if (d32 > 1e-6 || d8 > 1e-6 || dmix > 2.01 / 255) { std::printf("FAIL: premiere pixel formats\n"); return 1; }
+    g_premiereHost = false;
   }
   std::printf("checkout times:"); for (auto& kv : g_checkTime) std::printf(" %d@%d", kv.first, kv.second); std::printf("\n");
   std::printf("ALL OK\n");

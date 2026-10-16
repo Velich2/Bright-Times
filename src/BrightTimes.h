@@ -14,6 +14,7 @@
 #include "AE_EffectSuites.h"
 #include "AE_EffectPixelFormat.h"
 #include "AE_EffectGPUSuites.h"
+#include "PrSDKAESupport.h"
 #include "AE_Macros.h"
 #include "Param_Utils.h"
 

@@ -45,7 +45,7 @@ $files = @(
     "Headers\A.h", "Headers\AEConfig.h", "Headers\AE_Effect.h", "Headers\AE_EffectCB.h",
     "Headers\AE_EffectCBSuites.h", "Headers\AE_EffectSuites.h", "Headers\AE_EffectPixelFormat.h",
     "Headers\AE_EffectGPUSuites.h", "Headers\AE_EffectVers.h", "Headers\AE_Macros.h",
-    "Headers\AE_PluginData.h", "Headers\SP\SPBasic.h",
+    "Headers\AE_PluginData.h", "Headers\PrSDKAESupport.h", "Headers\SP\SPBasic.h",
     "Util\entry.h", "Util\Param_Utils.h",
     "Resources\PiPLtool.exe"
 )
@@ -58,6 +58,7 @@ foreach ($f in $files) {
 $symbols = @(
     "PF_PluginDataCB2",
     "PF_Cmd_SMART_RENDER_GPU",
+    "EffectWantsCheckedOutFramesToMatchRenderPixelFormat",
     "PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT",
     "PF_OutFlag2_SUPPORTS_GPU_RENDER_F32",
     "PF_OutFlag2_SUPPORTS_THREADED_RENDERING",

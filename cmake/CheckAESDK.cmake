@@ -34,6 +34,7 @@ set(_bt_required_files
   Headers/AE_EffectVers.h
   Headers/AE_Macros.h
   Headers/AE_PluginData.h
+  Headers/PrSDKAESupport.h
   Headers/SP/SPBasic.h
   Util/entry.h
   Util/Param_Utils.h)
@@ -55,6 +56,7 @@ endforeach()
 set(_bt_required_symbols
   "PF_PluginDataCB2|AE 2022"
   "PF_Cmd_SMART_RENDER_GPU|AE 2022"
+  "EffectWantsCheckedOutFramesToMatchRenderPixelFormat|CS6"
   "PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT|CS5.5"
   "PF_OutFlag2_SUPPORTS_GPU_RENDER_F32|CC 2015"
   "PF_OutFlag2_SUPPORTS_THREADED_RENDERING|AE 2022"
