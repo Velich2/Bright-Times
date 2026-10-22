@@ -88,9 +88,16 @@ BrightTimes-windows-symbols.zip ставить не нужно: это отла�
 Если что-то не так
 ------------------
 
-Диагностический лог: перед запуском программы выполните в командной строке
+Диагностический лог (замедляет работу — после проверки выключите).
+
+Windows: в командной строке
     setx BRIGHT_TIMES_LOG 1
-и перезапустите программу. Лог пишется в %TEMP%\BrightTimes.log.
-Выключить: setx BRIGHT_TIMES_LOG 0 (лог замедляет работу).
+затем перезапустите программу. Лог: %TEMP%\BrightTimes.log.
+Выключить: setx BRIGHT_TIMES_LOG 0
+
+macOS: в Терминале
+    launchctl setenv BRIGHT_TIMES_LOG 1
+затем полностью закройте и снова откройте программу. Лог: /tmp/BrightTimes.log.
+Выключить: launchctl unsetenv BRIGHT_TIMES_LOG (действует до перезагрузки Mac).
 
 Вопросы и ошибки: https://github.com/Velich2/Bright-Times/issues
