@@ -62,7 +62,7 @@ tools/preview.cpp          офлайн-превью алгоритма
 * **Premiere Pro, GPU** (`src/premiere/`): отдельная точка входа `xGPUFilterEntry` (GPU API Premiere,
   CUDA / Metal, кадры 32f и 16f). Соседние кадры запрашиваются через GetFrameDependencies, Clip Edges
   учитывается. Нужен Premiere Pro SDK (`-DPR_SDK_ROOT=...`, `build.ps1` ищет его сам). Цвета Custom
-  Palette читаются как 64-битный ARGB по 16 бит на канал (кодировка в GPU API не документирована);
+  Palette читаются как 64-битный ARGB по 16 бит на канал, как их передаёт Premiere 25 (в GPU API это не документировано);
   если Premiere передаст их иначе, GPU-фильтр отказывается, этот клип рендерится на CPU, а сырые
   значения пишутся в лог (`color N: ... UNKNOWN`).
 * **Premiere Pro, CPU**: Premiere не поддерживает SmartFX и GPU-путь After Effects, поэтому без GPU

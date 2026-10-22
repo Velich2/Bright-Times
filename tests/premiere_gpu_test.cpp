@@ -133,11 +133,11 @@ prSuiteError GetParam(csSDK_int32, csSDK_int32 index, PrTime, PrParam* out)
         case kInt:   out->mType = kPrParamType_Int32; out->mInt32 = d.u.sd.value; break;
         case kBool:  out->mType = kPrParamType_Bool;  out->mBool = d.u.bd.value ? 1 : 0; break;
         case kAngle: out->mType = kPrParamType_Float64; out->mFloat64 = d.u.ad.value / 65536.0; break;
-        case kColor: {  // Int64, 16 bits per channel 0xAAAARRRRGGGGBBBB
+        case kColor: {  // as Premiere 25: Int64 0xAAAARRRRGGGGBBBB, 8-bit values shifted up (alpha 0xFF00)
             const PF_Pixel c = d.u.cd.value;
             if (g_colorUnknownEncoding) { out->mType = kPrParamType_Float64; out->mFloat64 = c.red; break; }
             out->mType  = kPrParamType_Int64;
-            out->mInt64 = (csSDK_int64)((0xFFFFull << 48) | (c.red * 257ull << 32) | (c.green * 257ull << 16) | c.blue * 257ull);
+            out->mInt64 = (csSDK_int64)((0xFF00ull << 48) | (c.red * 256ull << 32) | (c.green * 256ull << 16) | c.blue * 256ull);
             break;
         }
         default:     out->mType = kPrParamType_Float64; out->mFloat64 = d.u.fs_d.value; break;

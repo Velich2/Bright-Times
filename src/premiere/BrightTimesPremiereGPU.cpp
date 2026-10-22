@@ -28,6 +28,7 @@
 #include "PrSDKVideoSegmentProperties.h"
 #include "PrSDKMemoryManagerSuite.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -177,10 +178,12 @@ public:
     A_long    Popup(int i)    { return Int(i) + popupShift_; }
     float     AngleDeg(int i) { return Float(i); }
 
-    // Colours: Premiere passes kPrParamType_Int64 with 16 bits per channel,
-    // 0xAAAARRRRGGGGBBBB; an Int32 0xAARRGGBB is accepted too. The alpha of a
-    // colour parameter is always opaque, which identifies the layout. Anything
-    // else marks the colour as unknown (-> software path) and is logged.
+    // Colours: Premiere passes kPrParamType_Int64, 16 bits per channel
+    // 0xAAAARRRRGGGGBBBB, with 8-bit values shifted up (255 -> 0xFF00, alpha
+    // 0xFF00). The alpha of a colour parameter is always full, so it is the
+    // scale of the channels (0xFF00 or 0xFFFF) and identifies the layout. An
+    // Int32 0xAARRGGBB is accepted too. Anything else marks the colour as
+    // unknown (-> software path) and is logged.
     bt::Color Color(int aeIndex)
     {
         PrParam p;
@@ -196,8 +199,11 @@ public:
         unsigned long long raw   = 0;
         if (p.mType == kPrParamType_Int64) {
             raw = static_cast<unsigned long long>(p.mInt64);
-            if ((raw >> 48) == 0xFFFF) {
-                c     = {((raw >> 32) & 0xFFFF) / 65535.f, ((raw >> 16) & 0xFFFF) / 65535.f, (raw & 0xFFFF) / 65535.f};
+            const unsigned long long full = raw >> 48;
+            if (full == 0xFF00 || full == 0xFFFF) {
+                const float inv = 1.f / static_cast<float>(full);
+                auto        ch  = [&](int shift) { return std::min(1.f, ((raw >> shift) & 0xFFFF) * inv); };
+                c     = {ch(32), ch(16), ch(0)};
                 known = true;
             }
         } else if (p.mType == kPrParamType_Int32) {
