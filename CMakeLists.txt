@@ -176,14 +176,22 @@ elseif(APPLE)
   foreach(dir IN LISTS AE_INCLUDES)
     list(APPEND rez_inc -i "${dir}")
   endforeach()
+  # CMAKE_OSX_SYSROOT is often empty (Xcode generator); an empty -isysroot
+  # value would be dropped and Rez would take the .r file as the sysroot.
+  set(_bt_sysroot "${CMAKE_OSX_SYSROOT}")
+  if(NOT _bt_sysroot OR NOT IS_DIRECTORY "${_bt_sysroot}")
+    execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
+                    OUTPUT_VARIABLE _bt_sysroot OUTPUT_STRIP_TRAILING_WHITESPACE)
+  endif()
   add_custom_command(
     OUTPUT  "${BT_RSRC}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${BT_GEN_DIR}"
     COMMAND xcrun Rez -o "${BT_RSRC}" -useDF -d __MACH__ -arch x86_64 -arch arm64
-            ${rez_inc} -isysroot "${CMAKE_OSX_SYSROOT}"
+            ${rez_inc} -isysroot "${_bt_sysroot}"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/BrightTimesPiPL.r"
     DEPENDS src/BrightTimesPiPL.r
-    COMMENT "Building PiPL resource (Rez)")
+    COMMENT "Building PiPL resource (Rez)"
+    VERBATIM)
   target_sources(BrightTimes PRIVATE "${BT_RSRC}")
   set_source_files_properties("${BT_RSRC}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
