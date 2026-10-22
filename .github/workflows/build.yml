@@ -158,17 +158,35 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            docs/RELEASE_README.md
+            docs/examples/
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Zip
+        env:
+          TAG: ${{ inputs.release || github.ref_name }}
         run: |
           mkdir -p out
+          mkdir -p extra/examples
+          cp docs/RELEASE_README.md extra/README.txt
+          cp docs/examples/* extra/examples/
+          # Release page: example images from the repository at the release tag.
+          sed "s#](examples/#](https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/docs/examples/#g" \
+            docs/RELEASE_README.md > release_body.md
           if [ -d artifacts/BrightTimes-windows ]; then
             (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows.zip BrightTimes)
+            (cd extra && zip -r ../out/BrightTimes-windows.zip README.txt examples)
             (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows-symbols.zip symbols)
           fi
-          [ -f artifacts/BrightTimes-macos/BrightTimes-macos.zip ] && cp artifacts/BrightTimes-macos/BrightTimes-macos.zip out/
+          if [ -f artifacts/BrightTimes-macos/BrightTimes-macos.zip ]; then
+            cp artifacts/BrightTimes-macos/BrightTimes-macos.zip out/
+            (cd extra && zip -r ../out/BrightTimes-macos.zip README.txt examples)
+          fi
           ls -l out
       - name: Check
         run: |
@@ -189,4 +207,5 @@ jobs:
           tag_name: ${{ inputs.release || github.ref_name }}
           target_commitish: ${{ github.sha }}
           files: out/*
+          body_path: release_body.md
           generate_release_notes: true

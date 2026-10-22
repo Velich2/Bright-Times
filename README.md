@@ -7,9 +7,11 @@
 цветовые фильтры нормируются так, что в сумме дают белый: всё неподвижное
 сохраняет исходный цвет, а всё движущееся расслаивается на цветные «призраки».
 
-![preview](docs/preview.png)
+![animation](docs/examples/animation.gif)
 
-*Синтетическая сцена из `tools/preview.cpp`: статичный фон остаётся без изменений, движущийся объект раскладывается в спектр.*
+![modes](docs/examples/modes.png)
+
+*Синтетическая сцена (`tools/examples.cpp` → `tools/make_examples.py`): статичный фон, луна и фонари остаются без изменений, мяч и вращающийся жезл раскладываются в цвета.*
 
 ## Параметры
 
@@ -139,6 +141,7 @@ Metal включён по умолчанию, бандл универсальн�
 сборка `.aex` под Windows (CUDA 12.8 + OpenCL) и универсального `.plugin` под macOS (Metal). Готовые файлы —
 в *Actions → запуск → Artifacts*. Релиз: *Actions → Build → Run workflow*, в поле **release** указать версию
 (например `v1.0.1`) — сборка создаст тег и GitHub Release с архивами. То же делает push тега `v*`.
+Описание релиза и `README.txt` внутри архивов берутся из `docs/RELEASE_README.md` (установка для пользователей).
 
 SDK Adobe нельзя выкладывать в публичный репозиторий, поэтому сборки скачивают их по ссылкам из секретов
 (*Settings → Secrets and variables → Actions → New repository secret*):
@@ -174,5 +177,6 @@ cmake --build build-tests && ctest --test-dir build-tests --output-on-failure
 * `premiere_gpu` — мок-хост Premiere гоняет `xGPUFilterEntry` (CreateInstance, GetFrameDependencies, Render) с кадрами в буферах OpenCL и сравнивает с независимым CPU-эталоном: 32f точно, 16f в пределах точности half, Clip Edges, Custom Palette, отказ при неизвестной кодировке цвета.
 * `opencl_host` — тот же путь на GPU через OpenCL (подойдёт и CPU-реализация, например pocl) и сравнение с CPU: расхождение ≤ 2·10⁻⁷.
 * `bt_preview <dir>` — рендер синтетической сцены в PPM.
+* Картинки примеров в `docs/examples`: `c++ -std=c++17 -O2 -Isrc tools/examples.cpp -o bt_examples && ./bt_examples out && python3 tools/make_examples.py out docs/examples` (нужен Pillow).
 
 `tests/sdk_stub/` — минимальные собственные заглушки SDK только для тестов; сам плагин всегда собирается с официальным SDK.
