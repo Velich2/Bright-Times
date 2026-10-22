@@ -59,12 +59,11 @@ jobs:
         if: steps.sdk.outputs.ok == 'true'
         shell: pwsh
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest $env:AE_SDK_URL -OutFile ae_sdk.zip
-          Expand-Archive ae_sdk.zip -DestinationPath sdk/ae
+          python tools/ci_fetch_sdk.py $env:AE_SDK_URL sdk/ae AE_Effect.h 3 AE_SDK_ROOT
+          if ($LASTEXITCODE) { exit 1 }
           if ($env:PR_SDK_URL) {
-            Invoke-WebRequest $env:PR_SDK_URL -OutFile pr_sdk.zip
-            Expand-Archive pr_sdk.zip -DestinationPath sdk/pr
+            python tools/ci_fetch_sdk.py $env:PR_SDK_URL sdk/pr PrSDKGPUFilter.h 2 PR_SDK_ROOT
+            if ($LASTEXITCODE) { exit 1 }
           } else { Write-Host "::warning::PR_SDK_URL is not set - no GPU rendering in Premiere Pro" }
       - name: Install CUDA ${{ env.CUDA_VERSION }} (compiler and runtime only)
         if: steps.sdk.outputs.ok == 'true'
@@ -87,9 +86,9 @@ jobs:
         shell: pwsh
         run: |
           $cmakeArgs = @("-S", ".", "-B", "build", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-                    "-DAE_SDK_ROOT=$PWD/sdk/ae", "-DBT_ENABLE_CUDA=ON",
+                    "-DAE_SDK_ROOT=$env:AE_SDK_ROOT", "-DBT_ENABLE_CUDA=ON",
                     "-DCMAKE_CUDA_COMPILER=$env:CUDA_PATH/bin/nvcc.exe")
-          if (Test-Path sdk/pr) { $cmakeArgs += "-DPR_SDK_ROOT=$PWD/sdk/pr" }
+          if ($env:PR_SDK_ROOT) { $cmakeArgs += "-DPR_SDK_ROOT=$env:PR_SDK_ROOT" }
           cmake @cmakeArgs
       - name: Build
         if: steps.sdk.outputs.ok == 'true'
@@ -121,18 +120,16 @@ jobs:
       - name: Download SDKs
         if: steps.sdk.outputs.ok == 'true'
         run: |
-          curl -fsSL "${AE_SDK_MAC_URL:-$AE_SDK_URL}" -o ae_sdk.zip
-          mkdir -p sdk/ae && ditto -x -k ae_sdk.zip sdk/ae
+          python3 tools/ci_fetch_sdk.py "${AE_SDK_MAC_URL:-$AE_SDK_URL}" sdk/ae AE_Effect.h 3 AE_SDK_ROOT
           if [ -n "$PR_SDK_URL" ]; then
-            curl -fsSL "$PR_SDK_URL" -o pr_sdk.zip
-            mkdir -p sdk/pr && ditto -x -k pr_sdk.zip sdk/pr
+            python3 tools/ci_fetch_sdk.py "$PR_SDK_URL" sdk/pr PrSDKGPUFilter.h 2 PR_SDK_ROOT
           fi
       - name: Configure
         if: steps.sdk.outputs.ok == 'true'
         run: |
           PR=""
-          [ -d sdk/pr ] && PR="-DPR_SDK_ROOT=$PWD/sdk/pr"
-          cmake -S . -B build -G Xcode -DAE_SDK_ROOT="$PWD/sdk/ae" $PR
+          [ -n "$PR_SDK_ROOT" ] && PR="-DPR_SDK_ROOT=$PR_SDK_ROOT"
+          cmake -S . -B build -G Xcode -DAE_SDK_ROOT="$AE_SDK_ROOT" $PR
       - name: Build
         if: steps.sdk.outputs.ok == 'true'
         run: cmake --build build --config Release
