@@ -1,0 +1,170 @@
+# Bright Times CI: offline tests on every push / pull request, plug-in builds
+# for Windows (.aex, CUDA + OpenCL) and macOS (.plugin, Metal), a GitHub
+# release for tags v*.
+#
+# The Adobe SDKs may not be redistributed, so they are not in the repository.
+# The plug-in builds download them from links stored as repository secrets:
+#   AE_SDK_URL      zip of the After Effects SDK (required for the builds)
+#   PR_SDK_URL      zip of the Premiere Pro SDK  (GPU rendering in Premiere)
+#   AE_SDK_MAC_URL  optional: the macOS After Effects SDK, else AE_SDK_URL
+# Without AE_SDK_URL the plug-in jobs only print a notice.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AE_SDK_URL: ${{ secrets.AE_SDK_URL }}
+  PR_SDK_URL: ${{ secrets.PR_SDK_URL }}
+  AE_SDK_MAC_URL: ${{ secrets.AE_SDK_MAC_URL }}
+
+jobs:
+  tests:
+    name: Tests (mock hosts, OpenCL on the CPU)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL (pocl)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers pocl-opencl-icd
+      - name: Build
+        run: |
+          cmake -S . -B build-tests -DBT_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-tests -j 4
+      - name: Test
+        run: ctest --test-dir build-tests --output-on-failure
+
+  windows:
+    name: Windows (.aex)
+    runs-on: windows-2022
+    env:
+      CUDA_VERSION: 12.8.1
+      CUDA_SHORT: '12.8'
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDK secrets
+        id: sdk
+        shell: pwsh
+        run: |
+          if ($env:AE_SDK_URL) { "ok=true" >> $env:GITHUB_OUTPUT }
+          else { Write-Host "::notice::AE_SDK_URL secret is not set - Windows plug-in build skipped" }
+      - name: Download SDKs
+        if: steps.sdk.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          python tools/ci_fetch_sdk.py $env:AE_SDK_URL sdk/ae AE_Effect.h 3 AE_SDK_ROOT
+          if ($LASTEXITCODE) { exit 1 }
+          if ($env:PR_SDK_URL) {
+            python tools/ci_fetch_sdk.py $env:PR_SDK_URL sdk/pr PrSDKGPUFilter.h 2 PR_SDK_ROOT
+            if ($LASTEXITCODE) { exit 1 }
+          } else { Write-Host "::warning::PR_SDK_URL is not set - no GPU rendering in Premiere Pro" }
+      - name: Install CUDA ${{ env.CUDA_VERSION }} (compiler and runtime only)
+        if: steps.sdk.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $url = "https://developer.download.nvidia.com/compute/cuda/$env:CUDA_VERSION/network_installers/cuda_${env:CUDA_VERSION}_windows_network.exe"
+          Invoke-WebRequest $url -OutFile cuda.exe
+          $p = Start-Process cuda.exe -ArgumentList "-s nvcc_$env:CUDA_SHORT cudart_$env:CUDA_SHORT" -Wait -PassThru
+          $cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$env:CUDA_SHORT"
+          if (-not (Test-Path "$cuda\bin\nvcc.exe")) { throw "CUDA install failed (exit $($p.ExitCode))" }
+          "CUDA_PATH=$cuda" >> $env:GITHUB_ENV
+          "$cuda\bin" >> $env:GITHUB_PATH
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: steps.sdk.outputs.ok == 'true'
+        with:
+          arch: x64
+      - name: Configure
+        if: steps.sdk.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          $cmakeArgs = @("-S", ".", "-B", "build", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                    "-DAE_SDK_ROOT=$env:AE_SDK_ROOT", "-DBT_ENABLE_CUDA=ON",
+                    "-DCMAKE_CUDA_COMPILER=$env:CUDA_PATH/bin/nvcc.exe")
+          if ($env:PR_SDK_ROOT) { $cmakeArgs += "-DPR_SDK_ROOT=$env:PR_SDK_ROOT" }
+          cmake @cmakeArgs
+      - name: Build
+        if: steps.sdk.outputs.ok == 'true'
+        run: cmake --build build
+      - name: Package
+        if: steps.sdk.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist/BrightTimes | Out-Null
+          Copy-Item build/BrightTimes.aex dist/BrightTimes/
+          New-Item -ItemType Directory dist/symbols | Out-Null
+          Copy-Item build/BrightTimes.pdb, build/BrightTimes.map dist/symbols/ -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: steps.sdk.outputs.ok == 'true'
+        with:
+          name: BrightTimes-windows
+          path: dist/
+
+  macos:
+    name: macOS (.plugin, universal)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDK secrets
+        id: sdk
+        run: |
+          if [ -n "$AE_SDK_URL$AE_SDK_MAC_URL" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::AE_SDK_URL secret is not set - macOS plug-in build skipped"; fi
+      - name: Download SDKs
+        if: steps.sdk.outputs.ok == 'true'
+        run: |
+          python3 tools/ci_fetch_sdk.py "${AE_SDK_MAC_URL:-$AE_SDK_URL}" sdk/ae AE_Effect.h 3 AE_SDK_ROOT
+          if [ -n "$PR_SDK_URL" ]; then
+            python3 tools/ci_fetch_sdk.py "$PR_SDK_URL" sdk/pr PrSDKGPUFilter.h 2 PR_SDK_ROOT
+          fi
+      - name: Configure
+        if: steps.sdk.outputs.ok == 'true'
+        run: |
+          PR=""
+          [ -n "$PR_SDK_ROOT" ] && PR="-DPR_SDK_ROOT=$PR_SDK_ROOT"
+          cmake -S . -B build -G Xcode -DAE_SDK_ROOT="$AE_SDK_ROOT" $PR
+      - name: Build
+        if: steps.sdk.outputs.ok == 'true'
+        run: cmake --build build --config Release
+      - name: Package
+        if: steps.sdk.outputs.ok == 'true'
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent build/Release/BrightTimes.plugin dist/BrightTimes-macos.zip
+      - uses: actions/upload-artifact@v4
+        if: steps.sdk.outputs.ok == 'true'
+        with:
+          name: BrightTimes-macos
+          path: dist/
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, windows, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Zip
+        run: |
+          mkdir -p out
+          if [ -d artifacts/BrightTimes-windows ]; then
+            (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows.zip BrightTimes)
+            (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows-symbols.zip symbols)
+          fi
+          [ -f artifacts/BrightTimes-macos/BrightTimes-macos.zip ] && cp artifacts/BrightTimes-macos/BrightTimes-macos.zip out/
+          ls -l out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
