@@ -8,6 +8,10 @@ Bright Times — плагин для After Effects и Premiere Pro
 
 Подробное описание и исходный код: https://github.com/Velich2/Bright-Times
 
+![Анимация: исходник и Bright Times](examples/animation.gif)
+
+![До и после](examples/before_after.png)
+
 
 Установка — Windows
 -------------------
@@ -65,6 +69,20 @@ BrightTimes-windows-symbols.zip ставить не нужно: это отла�
 5. Blend Mode: Optical (Balanced) — неподвижное сохраняет цвет; Tinted Trails —
    следы ровно в цветах палитры (для палитр, например, только из синих).
 6. Blend With Original — смешать с исходным клипом (100 % — без эффекта).
+
+
+Примеры режимов
+---------------
+
+Картинки лежат в папке examples рядом с этим файлом.
+
+![Режимы](examples/modes.png)
+
+- Optical · Spectrum — по умолчанию: радуга, неподвижное не меняется.
+- RGB Tri-Color, Group Order: Cyclic, Frame Step 3 — классический «Harris shutter».
+- Frames Forward 0, Color Order: Past to Future — радужный шлейф только из прошлого.
+- Tinted Trails · Custom Palette — следы ровно в цветах палитры.
+- Lighten — яркие насыщенные копии поверх кадра.
 
 
 Если что-то не так
