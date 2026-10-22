@@ -28,6 +28,7 @@
 #include "PrSDKVideoSegmentProperties.h"
 #include "PrSDKMemoryManagerSuite.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -139,8 +140,9 @@ int FrameworkOf(PrGPUDeviceFramework fw)
 
 class PrParamReader {
 public:
-    PrParamReader(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime time)
-        : seg_(seg), node_(node), time_(time) {}
+    // popupShift: added to popup values (1 when the host's popups are 0-based).
+    PrParamReader(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime time, int popupShift)
+        : seg_(seg), node_(node), time_(time), popupShift_(popupShift) {}
 
     bool ok() const { return ok_; }
 
@@ -172,7 +174,7 @@ public:
     A_long    Int(int i)      { return static_cast<A_long>(std::lround(Num(i))); }
     float     Float(int i)    { return static_cast<float>(Num(i)); }
     bool      Bool(int i)     { return Num(i) != 0.0; }
-    A_long    Popup(int i)    { return Int(i); }
+    A_long    Popup(int i)    { return Int(i) + popupShift_; }
     float     AngleDeg(int i) { return Float(i); }
 
     // Colours: Premiere passes kPrParamType_Int64 with 16 bits per channel,
@@ -218,9 +220,39 @@ private:
     PrSDKVideoSegmentSuite* seg_;
     csSDK_int32             node_;
     PrTime                  time_;
+    int                     popupShift_;
     bool                    ok_           = true;
     bool                    colorUnknown_ = false;
 };
+
+// Popup values are 1-based in the After Effects API; Premiere's GPU API does
+// not document its base. It is learned from a value only one base allows (0,
+// or the item count) and kept for the session. The defaults are the first
+// items, so applying the effect decides it.
+std::atomic<int> g_popupBase{-1};
+
+int PopupBase(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime t)
+{
+    const int known = g_popupBase.load();
+    if (known >= 0) return known;
+    struct Popup { int index, count; };
+    const Popup popups[] = {{BT_EDGE_MODE, 2}, {BT_GROUP_MODE, 2}, {BT_COLOR_ORDER, 2},
+                            {BT_COLOR_MODE, 3}, {BT_TINT_MODE, 2},  {BT_BLEND_MODE, 5}};
+    PrParamReader r(seg, node, t, 0);
+    int           base = -1;
+    for (const Popup& p : popups) {
+        const A_long v = r.Int(p.index);
+        BT_LOG("  popup %d raw %d", p.index - 1, static_cast<int>(v));
+        if (!r.ok()) return 1;
+        if (v == 0) base = 0;
+        if (v == p.count) base = 1;
+        if (base >= 0) break;
+    }
+    if (base < 0) return 1;  // undecided: After Effects semantics for now
+    g_popupBase.store(base);
+    BT_LOG("  popups are %d-based", base);
+    return base;
+}
 
 // Reads the settings at clip time `t`. Returns false if the GPU cannot render
 // them (unreadable parameter, palette colour in an unknown encoding, GPU
@@ -228,23 +260,11 @@ private:
 bool ReadPrSettings(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime t, bt::Settings& s,
                     bool& holdEdges)
 {
-    PrParamReader r(seg, node, t);
+    PrParamReader r(seg, node, t, PopupBase(seg, node, t) == 0 ? 1 : 0);
     ReadSettingsFrom(r, s);
-    const bool useGpu = r.Bool(BT_USE_GPU);
-    A_long     edge   = r.Popup(BT_EDGE_MODE);
+    const bool   useGpu = r.Bool(BT_USE_GPU);
+    const A_long edge   = r.Popup(BT_EDGE_MODE);
     if (!r.ok()) return false;
-
-    // Popups are 1-based in the After Effects API. A 0 can only come from a
-    // 0-based host encoding; shift all popups in that case.
-    if (edge == 0 || s.groupMode == 0 || s.colorOrder == 0 || s.colorMode == 0 || s.tintMode == 0 ||
-        s.blendMode == 0) {
-        edge += 1;
-        s.groupMode  = static_cast<bt::GroupMode>(s.groupMode + 1);
-        s.colorOrder = static_cast<bt::ColorOrder>(s.colorOrder + 1);
-        s.colorMode  = static_cast<bt::ColorMode>(s.colorMode + 1);
-        s.tintMode   = static_cast<bt::TintMode>(s.tintMode + 1);
-        s.blendMode  = static_cast<bt::BlendMode>(s.blendMode + 1);
-    }
     holdEdges = edge == BT_EDGE_HOLD;
     BT_LOG("  settings: back %d fwd %d step %d groups %d groupMode %d order %d colorMode %d tint %d blend %d "
            "edge %d gpu %d",

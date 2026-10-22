@@ -80,7 +80,8 @@ MockPPix* NewPPix(PrPixelFormat fmt, int w, int h)
 }
 
 int g_paramReads = 0;
-bool g_colorUnknownEncoding = false;  // colours as Float64 (an encoding the filter does not know)
+bool g_colorUnknownEncoding = false;
+int  g_popupOffset = 0;  // 1: the host passes popups 0-based  // colours as Float64 (an encoding the filter does not know)
 PrTime g_durationTicks = 0;
 
 prSuiteError GetDeviceInfo(csSDK_uint32, csSDK_uint32, PrGPUDeviceInfo* info)
@@ -128,7 +129,7 @@ prSuiteError GetParam(csSDK_int32, csSDK_int32 index, PrTime, PrParam* out)
     ++g_paramReads;
     const PF_ParamDef& d = P(ae);
     switch (KindOf(ae)) {
-        case kPopup: out->mType = kPrParamType_Int32; out->mInt32 = d.u.pd.value; break;
+        case kPopup: out->mType = kPrParamType_Int32; out->mInt32 = d.u.pd.value - g_popupOffset; break;
         case kInt:   out->mType = kPrParamType_Int32; out->mInt32 = d.u.sd.value; break;
         case kBool:  out->mType = kPrParamType_Bool;  out->mBool = d.u.bd.value ? 1 : 0; break;
         case kAngle: out->mType = kPrParamType_Float64; out->mFloat64 = d.u.ad.value / 65536.0; break;
@@ -276,8 +277,9 @@ double RunGpu(int cur, PrPixelFormat fmt, bool hold, std::string* why)
 
 }  // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc > 1 && std::string(argv[1]) == "zero-based-popups") g_popupOffset = 1;
     cl_platform_id plat; cl_uint np = 0; clGetPlatformIDs(1, &plat, &np);
     if (!np) { std::printf("no OpenCL\n"); return 1; }
     clGetDeviceIDs(plat, CL_DEVICE_TYPE_ALL, 1, &g_dev, nullptr);
