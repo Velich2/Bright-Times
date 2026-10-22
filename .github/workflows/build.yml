@@ -158,17 +158,26 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: docs/RELEASE_README.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Zip
         run: |
           mkdir -p out
+          cp docs/RELEASE_README.md README.txt
           if [ -d artifacts/BrightTimes-windows ]; then
             (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows.zip BrightTimes)
+            zip -j out/BrightTimes-windows.zip README.txt
             (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows-symbols.zip symbols)
           fi
-          [ -f artifacts/BrightTimes-macos/BrightTimes-macos.zip ] && cp artifacts/BrightTimes-macos/BrightTimes-macos.zip out/
+          if [ -f artifacts/BrightTimes-macos/BrightTimes-macos.zip ]; then
+            cp artifacts/BrightTimes-macos/BrightTimes-macos.zip out/
+            zip -j out/BrightTimes-macos.zip README.txt
+          fi
           ls -l out
       - name: Check
         run: |
@@ -189,4 +198,5 @@ jobs:
           tag_name: ${{ inputs.release || github.ref_name }}
           target_commitish: ${{ github.sha }}
           files: out/*
+          body_path: docs/RELEASE_README.md
           generate_release_notes: true

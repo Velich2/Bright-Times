@@ -139,6 +139,7 @@ Metal включён по умолчанию, бандл универсальн�
 сборка `.aex` под Windows (CUDA 12.8 + OpenCL) и универсального `.plugin` под macOS (Metal). Готовые файлы —
 в *Actions → запуск → Artifacts*. Релиз: *Actions → Build → Run workflow*, в поле **release** указать версию
 (например `v1.0.1`) — сборка создаст тег и GitHub Release с архивами. То же делает push тега `v*`.
+Описание релиза и `README.txt` внутри архивов берутся из `docs/RELEASE_README.md` (установка для пользователей).
 
 SDK Adobe нельзя выкладывать в публичный репозиторий, поэтому сборки скачивают их по ссылкам из секретов
 (*Settings → Secrets and variables → Actions → New repository secret*):
