@@ -133,6 +133,24 @@ Metal включён по умолчанию, бандл универсальн�
 
 После установки: *Effect → Bright Times → Bright Times*.
 
+## Сборка на GitHub (Actions)
+
+`.github/workflows/build.yml`: на каждый push в `main` и pull request — офлайн-тесты (Linux, OpenCL на CPU через pocl),
+сборка `.aex` под Windows (CUDA 12.8 + OpenCL) и универсального `.plugin` под macOS (Metal). Готовые файлы —
+в *Actions → запуск → Artifacts*. Тег `v*` (например `git tag v1.0.0 && git push origin v1.0.0`) создаёт GitHub Release
+с архивами.
+
+SDK Adobe нельзя выкладывать в публичный репозиторий, поэтому сборки скачивают их по ссылкам из секретов
+(*Settings → Secrets and variables → Actions → New repository secret*):
+
+| Секрет | Что |
+|---|---|
+| `AE_SDK_URL` | прямая ссылка на zip After Effects SDK (без него сборки плагина пропускаются, тесты идут) |
+| `PR_SDK_URL` | прямая ссылка на zip Premiere Pro SDK (GPU в Premiere) |
+| `AE_SDK_MAC_URL` | необязательно: zip After Effects SDK для macOS, иначе берётся `AE_SDK_URL` |
+
+Ссылка должна отдавать сам файл: например, Dropbox-ссылка с `?dl=1` в конце вместо `?dl=0`.
+
 ## Диагностика
 
 Лог включается переменной окружения `BRIGHT_TIMES_LOG` (до запуска AE / Premiere):
