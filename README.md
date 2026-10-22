@@ -137,8 +137,8 @@ Metal включён по умолчанию, бандл универсальн�
 
 `.github/workflows/build.yml`: на каждый push в `main` и pull request — офлайн-тесты (Linux, OpenCL на CPU через pocl),
 сборка `.aex` под Windows (CUDA 12.8 + OpenCL) и универсального `.plugin` под macOS (Metal). Готовые файлы —
-в *Actions → запуск → Artifacts*. Тег `v*` (например `git tag v1.0.0 && git push origin v1.0.0`) создаёт GitHub Release
-с архивами.
+в *Actions → запуск → Artifacts*. Релиз: *Actions → Build → Run workflow*, в поле **release** указать версию
+(например `v1.0.1`) — сборка создаст тег и GitHub Release с архивами. То же делает push тега `v*`.
 
 SDK Adobe нельзя выкладывать в публичный репозиторий, поэтому сборки скачивают их по ссылкам из секретов
 (*Settings → Secrets and variables → Actions → New repository secret*):
