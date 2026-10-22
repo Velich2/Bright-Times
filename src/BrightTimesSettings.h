@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "BrightTimes.h"
+#include "BrightTimesParams.h"
 #include "BrightTimesCore.h"
 
 #include <cmath>

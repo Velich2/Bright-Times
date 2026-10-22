@@ -15,7 +15,7 @@
 //     unknown encoding makes the GPU filter decline (Custom Palette only), and
 //     the 32-bit float software path renders instead.
 
-#include "BrightTimes.h"
+#include "BrightTimesParams.h"
 #include "BrightTimesCore.h"
 #include "BrightTimesSettings.h"
 #include "BrightTimesLog.h"
@@ -39,6 +39,12 @@
 #include <mutex>
 #include <new>
 #include <vector>
+
+#ifdef _WIN32
+#define BT_EXPORT __declspec(dllexport)
+#else
+#define BT_EXPORT __attribute__((visibility("default")))
+#endif
 
 namespace {
 
@@ -172,10 +178,10 @@ public:
         }
     }
 
-    A_long    Int(int i)      { return static_cast<A_long>(std::lround(Num(i))); }
+    long    Int(int i)      { return static_cast<long>(std::lround(Num(i))); }
     float     Float(int i)    { return static_cast<float>(Num(i)); }
     bool      Bool(int i)     { return Num(i) != 0.0; }
-    A_long    Popup(int i)    { return Int(i) + popupShift_; }
+    long    Popup(int i)    { return Int(i) + popupShift_; }
     float     AngleDeg(int i) { return Float(i); }
 
     // Colours: Premiere passes kPrParamType_Int64, 16 bits per channel
@@ -247,7 +253,7 @@ int PopupBase(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime t)
     PrParamReader r(seg, node, t, 0);
     int           base = -1;
     for (const Popup& p : popups) {
-        const A_long v = r.Int(p.index);
+        const long v = r.Int(p.index);
         BT_LOG("  popup %d raw %d", p.index - 1, static_cast<int>(v));
         if (!r.ok()) return 1;
         if (v == 0) base = 0;
@@ -269,7 +275,7 @@ bool ReadPrSettings(PrSDKVideoSegmentSuite* seg, csSDK_int32 node, PrTime t, bt:
     PrParamReader r(seg, node, t, PopupBase(seg, node, t) == 0 ? 1 : 0);
     ReadSettingsFrom(r, s);
     const bool   useGpu = r.Bool(BT_USE_GPU);
-    const A_long edge   = r.Popup(BT_EDGE_MODE);
+    const long edge   = r.Popup(BT_EDGE_MODE);
     if (!r.ok()) return false;
     holdEdges = edge == BT_EDGE_HOLD;
     BT_LOG("  settings: back %d fwd %d step %d groups %d groupMode %d order %d colorMode %d tint %d blend %d "
@@ -614,7 +620,7 @@ prSuiteError Render(PrGPUFilterInstance* io, const PrGPUFilterRenderParams* rp, 
 // Entry point
 // ---------------------------------------------------------------------------
 
-extern "C" DllExport prSuiteError xGPUFilterEntry(csSDK_uint32 inHostInterfaceVersion,
+extern "C" BT_EXPORT prSuiteError xGPUFilterEntry(csSDK_uint32 inHostInterfaceVersion,
                                                   csSDK_int32* ioIndex, prBool inStartup,
                                                   piSuitesPtr /*piSuites*/, PrGPUFilter* outFilter,
                                                   PrGPUFilterInfo* outFilterInfo)
