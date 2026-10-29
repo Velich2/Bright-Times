@@ -1,7 +1,7 @@
 // Bright Times — core temporal colour-separation math.
 //
 // This header has no dependency on the After Effects SDK so the algorithm can be
-// unit-tested / previewed outside of AE (see tools/preview.cpp).
+// unit-tested and rendered outside of AE (see tools/examples.cpp).
 //
 // Principle (optical printing / "Harris shutter" style):
 //   * The target frame and N neighbouring frames (backward / forward in time) are
@@ -382,7 +382,7 @@ inline void FinalizePixel(BlendMode mode, float mix, const float* acc, const flo
     dst[0] = r; dst[1] = g; dst[2] = b; dst[3] = Clamp01(a);
 }
 
-// Row helpers (used by the offline preview). `src` == nullptr = transparent row.
+// Row helpers (used by tools/examples.cpp). `src` == nullptr = transparent row.
 inline void AccumulateRow(BlendMode mode, TintMode tint, const Sample& k,
                           const float* src, float* acc, int n)
 {

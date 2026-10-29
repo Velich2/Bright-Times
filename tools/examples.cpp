@@ -4,6 +4,7 @@
 //
 //   c++ -std=c++17 -O2 -Isrc tools/examples.cpp -o bt_examples
 //   ./bt_examples out_dir          # PPM stills + animation frames
+//   ./bt_examples out_dir stills   # stills only (the ctest smoke run)
 //   python3 tools/make_examples.py out_dir docs/examples
 //
 // The scene loops every kLoop frames, so the animation repeats seamlessly.
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -131,10 +133,13 @@ Image Effect(const bt::Settings& s, float t, int w, int h)
     return out;
 }
 
-void WritePPM(const std::string& path, const Image& im)
+bool WritePPM(const std::string& path, const Image& im)
 {
     FILE* f = std::fopen(path.c_str(), "wb");
-    if (!f) return;
+    if (!f) {
+        std::fprintf(stderr, "cannot write %s\n", path.c_str());
+        return false;
+    }
     std::fprintf(f, "P6\n%d %d\n255\n", im.w, im.h);
     for (int i = 0; i < im.w * im.h; ++i) {
         const float a = im.px[4 * i + 3];
@@ -143,14 +148,17 @@ void WritePPM(const std::string& path, const Image& im)
             std::fputc(static_cast<int>(v * 255.f + 0.5f), f);
         }
     }
-    std::fclose(f);
+    return std::fclose(f) == 0;
 }
 
 }  // namespace
 
 int main(int argc, char** argv)
 {
-    const std::string dir = argc > 1 ? argv[1] : ".";
+    const std::string dir    = argc > 1 ? argv[1] : ".";
+    const bool        stills = argc > 2 && std::string(argv[2]) == "stills";
+    std::error_code   ec;
+    std::filesystem::create_directories(dir, ec);
     constexpr int W = 640, H = 360;
     constexpr float T = 20.f;  // still frame time
 
@@ -187,22 +195,23 @@ int main(int argc, char** argv)
     bt::Settings glow = optical;  // lighten: brightest of the tinted copies
     glow.blendMode = bt::BlendMode_LIGHTEN;
 
-    WritePPM(dir + "/original.ppm", Scene(T, W, H));
-    WritePPM(dir + "/optical.ppm", Effect(optical, T, W, H));
-    WritePPM(dir + "/harris.ppm", Effect(harris, T, W, H));
-    WritePPM(dir + "/trail.ppm", Effect(trail, T, W, H));
-    WritePPM(dir + "/palette.ppm", Effect(palette, T, W, H));
-    WritePPM(dir + "/glow.ppm", Effect(glow, T, W, H));
+    bool ok = WritePPM(dir + "/original.ppm", Scene(T, W, H));
+    ok = ok && WritePPM(dir + "/optical.ppm", Effect(optical, T, W, H));
+    ok = ok && WritePPM(dir + "/harris.ppm", Effect(harris, T, W, H));
+    ok = ok && WritePPM(dir + "/trail.ppm", Effect(trail, T, W, H));
+    ok = ok && WritePPM(dir + "/palette.ppm", Effect(palette, T, W, H));
+    ok = ok && WritePPM(dir + "/glow.ppm", Effect(glow, T, W, H));
 
     // Animation: original and Optical side by side, one loop.
     constexpr int AW = 400, AH = 225;
-    for (int f = 0; f < kLoop; ++f) {
+    for (int f = 0; ok && !stills && f < kLoop; ++f) {
         char name[64];
         std::snprintf(name, sizeof(name), "/anim_orig_%02d.ppm", f);
-        WritePPM(dir + name, Scene(static_cast<float>(f), AW, AH));
+        ok = WritePPM(dir + name, Scene(static_cast<float>(f), AW, AH));
         std::snprintf(name, sizeof(name), "/anim_fx_%02d.ppm", f);
-        WritePPM(dir + name, Effect(optical, static_cast<float>(f), AW, AH));
+        ok = ok && WritePPM(dir + name, Effect(optical, static_cast<float>(f), AW, AH));
     }
+    if (!ok) return 1;
     std::printf("written to %s\n", dir.c_str());
     return 0;
 }

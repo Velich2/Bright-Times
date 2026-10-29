@@ -2,6 +2,7 @@
 
 add_executable(bt_examples ../tools/examples.cpp)
 target_include_directories(bt_examples PRIVATE ../src)
+add_test(NAME examples COMMAND bt_examples ${CMAKE_CURRENT_BINARY_DIR}/examples stills)
 
 add_executable(bt_cpu_host_test cpu_host_test.cpp ../src/BrightTimes.cpp ../src/gpu/BrightTimesGPU.cpp)
 target_include_directories(bt_cpu_host_test PRIVATE sdk_stub ../src ../src/gpu)
