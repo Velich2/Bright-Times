@@ -56,7 +56,7 @@ src/
     BrightTimesOpenCL.cpp  OpenCL (компиляция ядра при GPU_DEVICE_SETUP)
     BrightTimesMetal.mm    Metal (компиляция ядра при GPU_DEVICE_SETUP)
 tests/                     офлайн-тесты: мок-хост AE + заглушки SDK
-tools/preview.cpp          офлайн-превью алгоритма
+tools/examples.cpp         картинки примеров (офлайн, та же математика)
 ```
 
 * **SmartFX + Multi-Frame Rendering**, 8 / 16 / 32 bpc на CPU.
@@ -176,7 +176,6 @@ cmake --build build-tests && ctest --test-dir build-tests --output-on-failure
 * `cpu_host` — мок-хост прогоняет `EffectMain` (GLOBAL_SETUP → PARAMS_SETUP → UPDATE_PARAMS_UI → PRE_RENDER → SMART_RENDER) в 8/16/32 bpc для всех режимов; проверяет совпадение флагов с PiPL, баланс checkout/checkin и что в Optical статичные пиксели не меняются.
 * `premiere_gpu` — мок-хост Premiere гоняет `xGPUFilterEntry` (CreateInstance, GetFrameDependencies, Render) с кадрами в буферах OpenCL и сравнивает с независимым CPU-эталоном: 32f точно, 16f в пределах точности half, Clip Edges, Custom Palette, отказ при неизвестной кодировке цвета.
 * `opencl_host` — тот же путь на GPU через OpenCL (подойдёт и CPU-реализация, например pocl) и сравнение с CPU: расхождение ≤ 2·10⁻⁷.
-* `bt_preview <dir>` — рендер синтетической сцены в PPM.
-* Картинки примеров в `docs/examples`: `c++ -std=c++17 -O2 -Isrc tools/examples.cpp -o bt_examples && ./bt_examples out && python3 tools/make_examples.py out docs/examples` (нужен Pillow).
+* `bt_examples <dir>` — рендер картинок примеров в PPM; в `docs/examples` их собирает `python3 tools/make_examples.py <dir> docs/examples` (нужен Pillow).
 
 `tests/sdk_stub/` — минимальные собственные заглушки SDK только для тестов; сам плагин всегда собирается с официальным SDK.

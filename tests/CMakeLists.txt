@@ -1,7 +1,7 @@
 # Offline tests: no After Effects SDK required (tests/sdk_stub stands in for it).
 
-add_executable(bt_preview ../tools/preview.cpp)
-target_include_directories(bt_preview PRIVATE ../src)
+add_executable(bt_examples ../tools/examples.cpp)
+target_include_directories(bt_examples PRIVATE ../src)
 
 add_executable(bt_cpu_host_test cpu_host_test.cpp ../src/BrightTimes.cpp ../src/gpu/BrightTimesGPU.cpp)
 target_include_directories(bt_cpu_host_test PRIVATE sdk_stub ../src ../src/gpu)

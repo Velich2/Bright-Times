@@ -180,13 +180,12 @@ jobs:
             docs/RELEASE_README.md > release_body.md
           if [ -d artifacts/BrightTimes-windows ]; then
             (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows.zip BrightTimes)
-            (cd extra && zip -r ../out/BrightTimes-windows.zip README.txt examples)
             (cd artifacts/BrightTimes-windows && zip -r ../../out/BrightTimes-windows-symbols.zip symbols)
           fi
-          if [ -f artifacts/BrightTimes-macos/BrightTimes-macos.zip ]; then
-            cp artifacts/BrightTimes-macos/BrightTimes-macos.zip out/
-            (cd extra && zip -r ../out/BrightTimes-macos.zip README.txt examples)
-          fi
+          [ -f artifacts/BrightTimes-macos/BrightTimes-macos.zip ] && cp artifacts/BrightTimes-macos/BrightTimes-macos.zip out/
+          for z in out/BrightTimes-windows.zip out/BrightTimes-macos.zip; do
+            [ -f "$z" ] && (cd extra && zip -r "../$z" README.txt examples)
+          done
           ls -l out
       - name: Check
         run: |
